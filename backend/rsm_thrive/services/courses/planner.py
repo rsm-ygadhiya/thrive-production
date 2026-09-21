@@ -37,7 +37,7 @@ import re
 from functools import lru_cache
 
 from rsm_thrive.models import Enrollment
-from rsm_thrive.services.electives import (DEPARTMENT_LABELS, WORKLOAD_LEVEL,
+from rsm_thrive.services.courses.electives import (DEPARTMENT_LABELS, WORKLOAD_LEVEL,
                                             catalog_version, is_msba,
                                             load_careers, load_catalog,
                                             rank_electives, resolve_role)
@@ -1094,6 +1094,36 @@ def _offered_in(course, season):
                for offering in course.get("offerings") or [])
 
 
+def equivalents_of(course_id, catalog=None):
+    """Every catalog id that is the SAME course as `course_id`, itself included.
+
+    Rady numbers a second section of an MBA course with a trailing R -- MGT 477
+    and MGT 477R are both Consumer Behavior, and the catalog says "students may
+    not earn credit for both". `also_known_as` carries the same fact under
+    other numberings (MGT 203). A plan holding both twins would print Consumer
+    Behavior twice and count 8 units for 4, which is what happened the moment
+    both sections were scheduled for the same Spring.
+    """
+    catalog = catalog or _catalog_by_id()
+    out = {course_id}
+    course = catalog.get(course_id) or {}
+    for other in course.get("also_known_as") or []:
+        if other in catalog:
+            out.add(other)
+    twin = course_id[:-1] if course_id.endswith("R") else course_id + "R"
+    if twin in catalog:
+        out.add(twin)
+    for other_id, other in catalog.items():
+        if course_id in (other.get("also_known_as") or []):
+            out.add(other_id)
+    return out
+
+
+def _clashes(course_id, held, catalog=None):
+    """Is `course_id`, or a course equivalent to it, already in `held`?"""
+    return bool(equivalents_of(course_id, catalog) & set(held))
+
+
 def _within_workload(course, preference):
     return WORKLOAD_LEVEL.get(course.get("workload", "moderate"), 2) <= preference
 
@@ -1424,16 +1454,17 @@ def build_plan(answers, taken_ids=frozenset(), selections=None, skeleton=None,
                 row for row in ranked
                 if row["course"]["units"] == slot["units"]
                 and _offered_in(row["course"], quarter["season"])
-                and row["course"]["id"] not in used
-                and row["course"]["id"] not in taken_ids
+                and not _clashes(row["course"]["id"], used, catalog)
+                and not _clashes(row["course"]["id"], taken_ids, catalog)
             ]
             course = None
-            if chosen_id and chosen_id in catalog and chosen_id not in used:
+            if (chosen_id and chosen_id in catalog
+                    and not _clashes(chosen_id, used, catalog)):
                 picked = catalog[chosen_id]
                 # An override still has to be a legal course for this hole.
                 if (picked["units"] == slot["units"]
                         and _offered_in(picked, quarter["season"])
-                        and chosen_id not in taken_ids):
+                        and not _clashes(chosen_id, taken_ids, catalog)):
                     course = picked
             if course is None:
                 course = _pick(candidates, profile)
@@ -1577,7 +1608,7 @@ def alternatives_for(plan, answers, quarter_key, slot, taken_ids=frozenset(), li
             continue
         if not _offered_in(course, quarter["season"]):
             continue
-        if course["id"] in in_plan or course["id"] in taken_ids:
+        if _clashes(course["id"], in_plan, catalog) or _clashes(course["id"], taken_ids, catalog):
             continue
         sim = similarity(current_course, course) if current_course else 0.0
         row = fit.get(course["id"]) or {}
@@ -1672,7 +1703,7 @@ def effective_skeleton(answers, taken_ids=frozenset()):
     failure `apply_swap` exists to prevent.
     """
     track = (answers or {}).get("track") or "11 month"
-    skeleton, _pinned, _dropped = fixed_plan_inputs(answers, taken_ids)
+    skeleton, _pinned, _dropped, _unplaced = fixed_plan_inputs(answers, taken_ids)
     if skeleton is None:
         skeleton = TRACK_SKELETONS.get(track)
     if skeleton is None:
@@ -1729,7 +1760,7 @@ def apply_swap(answers, selections, quarter_key, slot, course_id, taken_ids=froz
             f"{quarter['slots'][slot]['units']}")
     if not _offered_in(course, quarter["season"]):
         raise NotOfferedError(f"{course['code']} is not offered in {quarter['label']}")
-    if course_id in taken_ids:
+    if _clashes(course_id, taken_ids, catalog):
         raise ValueError(f"you have already taken {course['code']}")
 
     updated = {key: dict(value) for key, value in (selections or {}).items()}
@@ -1748,13 +1779,16 @@ def apply_swap(answers, selections, quarter_key, slot, course_id, taken_ids=froz
     # to move it, so say where it already is rather than silently relocating it.
     for other_key, slots in updated.items():
         for other_slot, other_id in list(slots.items()):
-            if other_id != course_id:
+            if other_id not in equivalents_of(course_id, catalog):
                 continue
             if other_key == quarter_key and other_slot == str(slot):
                 continue
             label = next((q["label"] for q in skeleton if q["key"] == other_key),
                          other_key)
-            raise ValueError(f"{course['code']} is already in your {label} quarter")
+            held = (catalog.get(other_id) or {}).get("code", other_id)
+            raise ValueError(f"{held} is already in your {label} quarter"
+                             + ("" if other_id == course_id else
+                                f" — the same course as {course['code']}"))
 
     updated.setdefault(quarter_key, {})[str(slot)] = course_id
     return updated
@@ -1780,7 +1814,7 @@ def route_of(answers):
     stated = (answers or {}).get("route")
     if stated in ("fixed", "custom"):
         return stated
-    from rsm_thrive.services import bundles
+    from rsm_thrive.services.courses import bundles
 
     goals = (answers or {}).get("goals") or []
     return "fixed" if goals and bundles.bundle_for(goals[0]) else "custom"
@@ -1794,13 +1828,13 @@ def fixed_plan_inputs(answers, taken_ids=frozenset()):
     out. Every one of those falls back to the ordinary ranked plan rather than
     failing, so a fixed route can never leave a student with no plan at all.
     """
-    from rsm_thrive.services import bundles
+    from rsm_thrive.services.courses import bundles
 
     if route_of(answers) != "fixed":
-        return None, None, False
+        return None, None, False, []
     goals = answers.get("goals") or []
     if not goals:
-        return None, None, False
+        return None, None, False, []
     track = answers.get("track") or "11 month"
     dropped = False
     wanted_units = quarter_units_of(
@@ -1813,7 +1847,7 @@ def fixed_plan_inputs(answers, taken_ids=frozenset()):
         # to the heavy one there produced a 52-unit plan.
         {"track": track, "quarter_units": answers.get("quarter_units"),
          "workload": answers.get("workload")})
-    skeleton, selections, _courses = bundles.skeleton_for(
+    skeleton, selections, courses = bundles.skeleton_for(
         goals[0], track, taken_ids, wanted_units)
     if skeleton is None and wanted_units:
         # THE BUNDLE OUTRANKS THE SPREAD.
@@ -1837,10 +1871,24 @@ def fixed_plan_inputs(answers, taken_ids=frozenset()):
         # the walk-through -- the load question says so in as many words --
         # while the bundle is the entire reason the plan is about their
         # career rather than about the catalog.
-        skeleton, selections, _courses = bundles.skeleton_for(
+        skeleton, selections, courses = bundles.skeleton_for(
             goals[0], track, taken_ids, None)
         dropped = True
-    return skeleton, selections, bool(skeleton is not None and dropped)
+    # Recommended courses the timetable left no room for. `courses` is what
+    # the bundle search could actually lay into the quarters; anything in the
+    # bundle that is schedulable for this student and not in it was squeezed
+    # out by the terms it runs in, and the plan says so.
+    unplaced = []
+    if skeleton is not None:
+        bundle = bundles.bundle_for(goals[0]) or {}
+        catalog = _catalog_by_id()
+        for layer in ("anchor", "differentiator", "universal"):
+            for course_id in bundle.get(layer) or []:
+                if (course_id in catalog and course_id not in taken_ids
+                        and course_id not in bundles.PRE_PLACED
+                        and course_id not in (courses or [])):
+                    unplaced.append(display_code(catalog[course_id]))
+    return skeleton, selections, bool(skeleton is not None and dropped), unplaced
 
 
 def _tail_shortfall(answers, plan):
@@ -1891,7 +1939,7 @@ def build_for(answers, taken_ids=frozenset(), selections=None, start_from=None):
     # plan with both of them in it has been ignored, and was.
     taken_ids = frozenset(taken_ids) | stated_completed_ids(answers)
     wanted = route_of(answers)
-    skeleton, pinned, spread_dropped = fixed_plan_inputs(answers, taken_ids)
+    skeleton, pinned, spread_dropped, unplaced = fixed_plan_inputs(answers, taken_ids)
     if skeleton is None:
         return _routed(build_plan(answers, taken_ids, selections,
                                   start_from=start_from), "custom", wanted)
@@ -1917,6 +1965,8 @@ def build_for(answers, taken_ids=frozenset(), selections=None, start_from=None):
         # and the bundle won. Said out loud rather than left for them to
         # notice the quarters are not what they chose.
         plan["spreadDropped"] = spread_dropped
+        # Recommended courses left out because of the terms they run in.
+        plan["bundleUnplaced"] = unplaced
         # Whether the finishing quarter landed where the load says it should.
         # For some bundles it cannot: bi-analyst has 457, 402, 459 and MGTF
         # 405 offered in the final Fall, but sending 4 of those units there
@@ -1956,7 +2006,7 @@ def _routed(plan, used, wanted):
         for quarter in plan["quarters"]
         if quarter["unitsPlanned"] != quarter["unitsExpected"]]
     if used == "fixed":
-        from rsm_thrive.services import bundles
+        from rsm_thrive.services.courses import bundles
 
         goals = plan.get("profile", {}).get("career_roles") or []
         plan["bundleMissing"] = bundles.absent(plan, goals[0]) if goals else {}
@@ -2014,7 +2064,7 @@ def route_line(plan):
     if not goal_labels(plan):
         return ""
     if plan.get("route") != "fixed":
-        from rsm_thrive.services import bundles
+        from rsm_thrive.services.courses import bundles
 
         # Only offer the switch where there is something to switch TO. A
         # career the catalog has no bundle for got "say use the recommended
@@ -2047,9 +2097,21 @@ def route_line(plan):
                              f"rather than {q['expected']}" for q in flexed)
                  + ". The degree total is unchanged. Say **build it around "
                    "me** to hold the loads exactly instead.")
+    unplaced = plan.get("bundleUnplaced") or []
+    if unplaced:
+        # The timetable, not the student's load, is what left these out: the
+        # bundle search could not lay them into the quarters they are taught
+        # in, so their units went to the best fit for the goal instead.
+        line += ("\n\n> Not all of the recommended set fits the quarters it "
+                 "is taught in: "
+                 + ", ".join(f"**{code}**" for code in unplaced)
+                 + (" is" if len(unplaced) == 1 else " are")
+                 + " left out, and those units go to the next-best fit for "
+                   "your goal. Say **change** and a course in the walk-through "
+                   "to swap one back in.")
     missing = plan.get("bundleMissing") or {}
     dropped = [code for layer in ("anchor", "universal")
-               for code in missing.get(layer, [])]
+               for code in missing.get(layer, []) if code not in unplaced]
     if dropped:
         # Say it here rather than let a student compare two lists. The load
         # spread re-cuts every quarter's elective slots, and a 2-unit course
@@ -2623,6 +2685,18 @@ _QUESTION_OPENERS = (
 _HYPOTHETICAL = ("what if", "what happens if", "should i have", "would it be",
                  "instead of", "rather than", "suppose i", "if i switched",
                  "if i switch", "if i chose", "if i picked")
+
+
+def is_hypothetical(text):
+    """Is this turn a what-if -- a value mentioned to compare, not to choose?
+
+    Narrower than `is_question`: "can I still finish on time on the 11 month
+    track?" is a question that STATES a track, and "what if I had gone for
+    the 17 month instead" is one that does not. Only the second must never
+    move a value already on file, whichever reader saw it.
+    """
+    lowered = (text or "").strip().lower()
+    return any(phrase in lowered for phrase in _HYPOTHETICAL)
 
 
 def is_question(text):
@@ -3700,7 +3774,7 @@ def route_switch_reply(answers):
     "use the recommended bundle" to someone whose profile has none would be a
     button that cannot work.
     """
-    from rsm_thrive.services import bundles
+    from rsm_thrive.services.courses import bundles
 
     goals = answers.get("goals") or []
     if not goals or not bundles.bundle_for(goals[0]):

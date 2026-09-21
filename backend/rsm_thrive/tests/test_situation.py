@@ -17,7 +17,7 @@ import pytest
 from django.contrib.auth.models import User
 
 from rsm_thrive.models import Conversation
-from rsm_thrive.services import orchestrator, planner, router, situation
+from rsm_thrive.services.courses import orchestrator, planner, router, situation
 from rsm_thrive.services.llm import FakeLLM
 from rsm_thrive.testing import enroll, make_course, make_student
 

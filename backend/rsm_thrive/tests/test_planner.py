@@ -1,7 +1,7 @@
 import pytest
 
-from rsm_thrive.services import planner
-from rsm_thrive.services.electives import load_catalog
+from rsm_thrive.services.courses import planner
+from rsm_thrive.services.courses.electives import load_catalog
 
 ANSWERS = {
     "track": "11 month",
@@ -134,7 +134,7 @@ class TestSkillRatings:
         assert by_word["technical_comfort"] == by_number["technical_comfort"]
 
     def test_a_low_rating_still_raises_the_prerequisite_caution(self):
-        from rsm_thrive.services.electives import load_catalog
+        from rsm_thrive.services.courses.electives import load_catalog
 
         course = next(c for c in load_catalog()
                       if "python" in (c.get("prerequisites") or "").lower())
@@ -143,7 +143,7 @@ class TestSkillRatings:
         assert cautions and "out of 5" in cautions[0]
 
     def test_a_high_rating_raises_no_caution(self):
-        from rsm_thrive.services.electives import load_catalog
+        from rsm_thrive.services.courses.electives import load_catalog
 
         course = next(c for c in load_catalog()
                       if "python" in (c.get("prerequisites") or "").lower())
@@ -430,17 +430,30 @@ class TestSwap:
         duplicate guard is never reached."""
         by_id = {c["id"]: c for c in load_catalog()}
         plan = planner.build_for(ANSWERS)
-        elsewhere = next(
-            (r["courseId"] for q in plan["quarters"] if q["key"] != "fall"
-             for r in q["courses"]
-             if r["swappable"] and r["courseId"]
-             and by_id[r["courseId"]]["units"] == 4
-             and any((o.get("season") or "").upper() == "FA"
-                     for o in by_id[r["courseId"]].get("offerings") or [])),
-            None)
-        assert elsewhere, "no in-plan elective is also legal for the Fall slot"
+        # Any slot, and any course sitting in ANOTHER quarter that is legal
+        # for it -- the pair depends on the timetable, not on the test.
+        found = None
+        for quarter in plan["quarters"]:
+            for index, row in enumerate(quarter["courses"]):
+                if not row["swappable"]:
+                    continue
+                for other in plan["quarters"]:
+                    if other["key"] == quarter["key"]:
+                        continue
+                    for candidate in other["courses"]:
+                        course = by_id.get(candidate["courseId"] or "")
+                        if (candidate["swappable"] and course
+                                and course["units"] == row["units"]
+                                and planner._offered_in(course, quarter["season"])):
+                            found = (quarter["key"], index, course["id"])
+                if found:
+                    break
+            if found:
+                break
+        assert found, "no in-plan elective is also legal for another slot"
+        key, slot, elsewhere = found
         with pytest.raises(ValueError, match="already in your"):
-            planner.apply_swap(ANSWERS, {}, "fall", 2, elsewhere)
+            planner.apply_swap(ANSWERS, {}, key, slot, elsewhere)
 
 
 @pytest.mark.django_db
@@ -526,7 +539,7 @@ class TestAShortPlanSaysSo:
     # stopped meaning that the moment the catalog grew past 31 courses.
     @staticmethod
     def _all_fall_two_unit():
-        from rsm_thrive.services.electives import load_catalog
+        from rsm_thrive.services.courses.electives import load_catalog
 
         return frozenset(
             c["id"] for c in load_catalog()
@@ -570,7 +583,7 @@ class TestTheExtractorKnowsJobTitles:
     """
 
     def test_every_profile_offers_the_titles_it_is_called_by(self):
-        from rsm_thrive.services.electives import load_careers
+        from rsm_thrive.services.courses.electives import load_careers
 
         for role_id, role in load_careers().items():
             assert role.get("titles"), f"{role_id} has no titles"
@@ -636,20 +649,20 @@ class TestTheCatalogAnswersCourseQuestions:
     it found a fee page and replied, which belongs to the FAQ bot."""
 
     def test_a_named_course_returns_that_course_alone(self):
-        from rsm_thrive.services.electives import search_catalog
+        from rsm_thrive.services.courses.electives import search_catalog
 
         hits = search_catalog("what is MGTA 458 about")
         assert [c["code"] for c in hits] == ["MGTA 458"]
 
     def test_a_tool_finds_the_course_that_teaches_it(self):
-        from rsm_thrive.services.electives import search_catalog
+        from rsm_thrive.services.courses.electives import search_catalog
 
         codes = [c["code"] for c in search_catalog("which courses use Tableau")]
         assert "MGTA 457" in codes
 
     def test_a_season_is_searchable_by_name(self):
         """Students ask for "winter", never for "WI"."""
-        from rsm_thrive.services.electives import search_catalog
+        from rsm_thrive.services.courses.electives import search_catalog
 
         hits = search_catalog("which electives are offered in winter")
         assert hits, "a season name must reach the catalog"
@@ -664,7 +677,7 @@ class TestTheCatalogAnswersCourseQuestions:
         """The word "tuition" appears in a course description, so a bare term
         match answered a fee question from a course. A question has to be ABOUT
         courses before the catalog is consulted."""
-        from rsm_thrive.services.electives import search_catalog
+        from rsm_thrive.services.courses.electives import search_catalog
 
         assert search_catalog(question) == []
 
@@ -676,14 +689,14 @@ class TestTheCatalogAnswersCourseQuestions:
         ("how do i set up zoom", False),
     ])
     def test_course_questions_are_recognised(self, question, expected):
-        from rsm_thrive.services.electives import is_course_question
+        from rsm_thrive.services.courses.electives import is_course_question
 
         assert is_course_question(question) is expected
 
     def test_the_overview_carries_enough_to_answer_from(self):
         """A code list cannot answer "which run in winter" or "which have no
         prerequisites", and that is what it used to return."""
-        from rsm_thrive.services.bots import _catalog_context
+        from rsm_thrive.services.courses.replies import _catalog_context
 
         context = _catalog_context("what courses do you have")
         assert context

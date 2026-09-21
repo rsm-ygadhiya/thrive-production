@@ -11,7 +11,7 @@ field out of a student's sentence, which `router` still depends on to decide
 whether a question is industry-shaped. Those are the tests kept here.
 """
 
-from rsm_thrive.services.grounded_course_advisor.advisor import (
+from rsm_thrive.services.courses.advisor import (
     _target_field, is_industry_course_question,
 )
 

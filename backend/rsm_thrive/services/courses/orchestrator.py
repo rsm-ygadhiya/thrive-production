@@ -36,19 +36,17 @@ this makes it the property of the whole surface.
 
 import re
 
-from rsm_thrive.services import (bundles, electives, planner, router,
-                                 situation, skill_match)
 from rsm_thrive.services.bot_config import bot_config
-from rsm_thrive.services.bots import (BotReply, _catalog_context,
-                                      _course_availability, _explain_course,
-                                      _finalise_reply,
-                                      _handle_change_request, _plan_reply,
-                                      _review_reply, _small_talk_reply,
-                                      _wants_the_plan, append_sources,
-                                      build_context)
-from rsm_thrive.services.electives import (NON_MSBA_UNIT_CAP,
-                                            load_careers, load_catalog)
-from rsm_thrive.services.retrieval import retrieve
+from rsm_thrive.services.courses import (bundles, electives, planner, reading,
+                                         router, situation, skill_match)
+from rsm_thrive.services.courses.electives import (NON_MSBA_UNIT_CAP,
+                                                    load_careers, load_catalog)
+from rsm_thrive.services.courses.replies import (
+    _catalog_context, _course_availability, _explain_course, _finalise_reply,
+    _handle_change_request, _plan_reply, _review_reply, _small_talk_reply,
+    _wants_the_plan)
+from rsm_thrive.services.reply import BotReply, append_sources, build_context
+from rsm_thrive.services.resources.retrieval import retrieve
 
 
 # ---------------------------------------------------------------------------
@@ -176,6 +174,19 @@ ASK_FOR_A_LOAD = (
     "quarter individually when we walk through the plan, so nothing here is "
     "final.")
 
+# The answer to a question ABOUT the load options, asked instead of picking
+# one. Same facts as `ASK_FOR_A_LOAD`, said as an answer.
+LOAD_EXPLAINED = (
+    "None of them changes how many courses you take — the degree is **50 "
+    "units** whichever you pick, so this is only about where the weight "
+    "sits.\n\n"
+    "- **light** — the early quarters carry less; the later ones carry more\n"
+    "- **moderate** — the published plan, spread evenly\n"
+    "- **heavy** — the early quarters carry more; you get the weight done "
+    "early\n\n"
+    "Say one of those and I'll lay the plan out — and you can still change "
+    "any single quarter when we walk through it.")
+
 ASSUMED_LOAD_NOTE = (
     "I've spread the units the way the published plan does, since you haven't "
     "said — say _light_ or _heavy_ any time and I'll redo it.\n\n")
@@ -236,6 +247,14 @@ LOAD_UNAVAILABLE_NOTE = (
 # Said when a title was matched with a character of slop. Confirmed rather
 # than assumed: guessing which of fourteen careers someone meant is not a
 # guess to make quietly.
+# An exact title that the design document files under a differently named
+# profile. Not a guess -- the mapping is curated -- but the student typed one
+# name and is about to read another, and the line between them is owed.
+MAPPED_TITLE_NOTE = (
+    "**{title}** roles are covered here by the **{label}** profile \u2014 "
+    "that's the elective set the programme curates for this job. Say the word "
+    "if you meant something else.\n\n")
+
 FUZZY_ROLE_NOTE = (
     "Reading **{said}** as **{label}** — say the word if you meant something "
     "else.\n\n")
@@ -495,9 +514,19 @@ def _confirmation(question):
             other=" or ".join(f"**{o.get('short_label') or o['label']}**"
                               for o in others),
             say=(others[0].get("titles") or [others[0]["label"]])[0])
+    role = load_careers().get(role_id) or {}
+    label = role.get("label", role_id)
     if exact and router.names_a_job_function(question):
+        # An exact title, but not the profile's OWN name: "data engineer" is
+        # listed under Analytics Engineer, and the reply opened "Analytics
+        # Engineer --" with nothing saying why. That read as an assumption,
+        # though it is the design document's mapping. Say the mapping.
+        title = router.matched_title(question)
+        own = {str(label).lower(), str(role.get("short_label") or "").lower()}
+        if title and title not in own and not any(
+                title in name or name in title for name in own if name):
+            return MAPPED_TITLE_NOTE.format(title=title, label=label)
         return ""
-    label = (load_careers().get(role_id) or {}).get("label", role_id)
     # QUOTE WHAT THEY NAMED, not the first forty characters of their sentence.
     # Truncating the raw turn produced "Reading **im switching from consulting
     # into analyt** as **Analytics / Data Consultant**" -- a note whose whole
@@ -539,7 +568,7 @@ def named_only_a_track(question):
                 if word not in _ROLE_FILLER]
 
 
-def _intake_progress(conversation, question, answers):
+def _intake_progress(conversation, question, answers, learned=None):
     """A turn that moved the plan forward, or None.
 
     Runs before the router and produces no question of its own except one: a
@@ -547,8 +576,24 @@ def _intake_progress(conversation, question, answers):
     is FOR, and a plan of study built around no goal is just the published
     skeleton. That is the only genuinely blocking gap on this route, so it is
     the only thing asked.
+
+    `learned` overrides the deterministic reading of the turn. It is supplied
+    on the second pass, after the `read_turn` skill has read values off a
+    turn the rules could not -- "the longer one" for a track, "somewhere in
+    between" for a load -- and those values arrive already validated against
+    their closed sets (see `router._learned_from_reading`).
     """
-    learned = learned_from(question)
+    if learned is None:
+        learned = learned_from(question)
+    if planner.is_question(question):
+        # A QUESTION FILLS BLANKS AND OVERWRITES NOTHING -- the same rule
+        # `planner.merge_intake` states for the extractor, applied to the
+        # deterministic readers, which had no such guard. Measured live: "what
+        # if i had gone for the 17 month instead", asked over a finished
+        # 11-month plan, moved the student to the 17-month track and rebuilt
+        # everything. A what-if mentions a value without choosing it.
+        learned = {key: value for key, value in learned.items()
+                   if not answers.get(key)}
     # A QUESTION WE JUST ASKED OWNS THE NEXT TURN'S LOAD WORD.
     #
     # `learned_from` reads a load with the strict whole-message test unless
@@ -717,7 +762,7 @@ def _enrolment_caveats(codes):
     answered, saying "confirm before you plan around it" is the honest form of
     a recommendation we are not certain we can stand behind.
     """
-    from rsm_thrive.services.electives import DEPARTMENT_LABELS
+    from rsm_thrive.services.courses.electives import DEPARTMENT_LABELS
 
     seen = []
     for code in codes:
@@ -746,14 +791,48 @@ UNCOVERED_ROLE_PREFIX = (
 def _answer_role(llm, route, conversation, question, history):
     body = curated_recommendation(route.role_id) if route.role_id else None
     if body:
-        body = _confirmation(question) + body
+        body = (_confirmation(question) or _reading_note(route)) + body
         # Remember the goal, so a follow-up naming a track builds the right
         # plan without asking the student to say the role again.
         stored = planner.load_session_intake(conversation)
         planner.save_session_intake(conversation, {**stored, "goals": [route.role_id]})
         return BotReply(body, [], "curated", route=router.ROLE,
                         route_confidence=route.confidence)
+    if (route.industry_id and not route.role_id
+            and not router.names_a_job_function(question)):
+        # The model called it a role and could not name one, but DID read
+        # the words as one of the six industries. Measured live: "i want to
+        # work for a hedge fund" was refused as the career **hedge fund**,
+        # when a hedge fund is a place to work and the financial-services
+        # roles were the answer. An industry reading beats a refusal.
+        #
+        # Only for a WORKPLACE, though. "esports analyst" names a job, and a
+        # job the fourteen profiles do not cover is refused, not redirected
+        # to the catch-all industry's ten titles -- the same line
+        # `_uncurated_role` has always held, and the live sweep checks it.
+        return _answer_industry(llm, route, conversation, question)
     return _uncurated_role(llm, route, conversation, question)
+
+
+def _reading_note(route):
+    """The confirmation line for a role the MODEL read off the student's words.
+
+    `_confirmation` covers what the router can see for itself -- a misspelled
+    or shorthand title. A curated reading by the model (see
+    `understanding.curated_reading`) leaves nothing on the turn for the router
+    to match, so the note is built from what the route carried instead. Same
+    words as the fuzzy note, deliberately: to the student it is the same
+    event, a reading of theirs being checked.
+    """
+    if not route.reading or not route.role_id:
+        return ""
+    said = _student_words(route.reading) or " ".join(route.reading.split())
+    if not _looks_like_a_job_title(said):
+        said = " ".join(route.reading.split())[:60]
+    if not said:
+        return ""
+    label = (load_careers().get(route.role_id) or {}).get("label", route.role_id)
+    return FUZZY_ROLE_NOTE.format(said=said, label=label)
 
 
 # Words that are ALWAYS in a question and never distinguish one job from
@@ -873,38 +952,6 @@ ASK_WHAT_KIND_OF_WORK = (
     "operations and marketing. A job title is enough.\n\n"
     "Or just say **yes** and I'll go with that reading.")
 
-_ACCEPTANCES = frozenset({
-    # Yes, in the ways people type it. "yup" was missing and that alone broke
-    # the flow: the student answered the question, was not understood, and got
-    # the generic opening back as if they had said nothing.
-    "yes", "yep", "yup", "yeah", "yea", "ya", "y", "aye", "yes please",
-    "correct", "that's right", "thats right", "right", "exactly", "spot on",
-    "that works", "that one", "go with that", "go with it", "use that",
-    "sounds good", "sounds right", "perfect", "great", "fine", "ok", "okay",
-    "sure", "please", "go ahead", "go on", "do it", "lets do that",
-    "let's do that", "that's the one", "thats the one",
-    # And "I don't mind", which is an acceptance of whatever we suggested.
-    "anything", "any", "anything works", "whatever", "not sure", "no idea",
-    "dunno", "don't mind", "dont mind", "no preference", "you choose",
-    "you decide", "either", "up to you",
-})
-
-
-def _accepts_the_guess(question):
-    """Is this whole message a "yes" to the reading we offered?
-
-    Whole-message and punctuation-insensitive, so "yup!" and "Yes." count. A
-    closed list is fragile here in exactly the way it is everywhere else -- the
-    guard against that is not a longer list but `answer`, which sends anything
-    unrecognised BACK to the question it was answering rather than treating it
-    as a fresh topic.
-    """
-    import re as _re
-
-    lowered = " ".join(_re.sub(r"[^a-z' ]+", " ", (question or "").lower()).split())
-    return lowered in _ACCEPTANCES
-
-
 # ---------------------------------------------------------------------------
 # Route: a role the catalog has no profile for
 # ---------------------------------------------------------------------------
@@ -950,7 +997,11 @@ def _uncurated_role(llm, route, conversation, question):
     `llm` and `route` are unused now and kept so the call sites do not have to
     care which kind of answer this is.
     """
-    named = _student_words(question) or (route.unmatched_role or "")
+    # The model's own extraction of the job comes first: it has already
+    # stripped "hi! im an incoming international student, i want to be a"
+    # from around "sports scientist", where the filler list leaves enough
+    # of the sentence behind to look like no job at all.
+    named = (route.unmatched_role or "").strip() or _student_words(question)
     if not _looks_like_a_job_title(named):
         # NOT A JOB, so not a refusal. A student who writes "i worked in
         # marketing for 3 years and want to move more into data" has told us
@@ -1524,6 +1575,11 @@ _INDUSTRY_ALIASES = {
 }
 
 
+INDUSTRY_READING_NOTE = (
+    "Reading **{said}** as **{label}** — say the word if you meant a different "
+    "industry.\n\n")
+
+
 def _answer_industry(llm, route, conversation, question):
     """An industry question, answered from the curated taxonomy only.
 
@@ -1541,6 +1597,26 @@ def _answer_industry(llm, route, conversation, question):
     industry = resolve_industry(question)
     if industry:
         return industry_roles_reply(conversation, industry, route.confidence)
+    read = electives.industry_by_id(route.industry_id) if route.industry_id else None
+    if (read and read["id"] == "other" and router.names_a_job_function(question)
+            and not router.matched_role(question)):
+        # "esports analyst" names a JOB, and the only industry the model could
+        # place "esports" in is the catch-all. Answering with the catch-all's
+        # ten titles would be the redirect the refusal rule forbids: a job
+        # the fourteen profiles do not cover is refused, not steered to the
+        # nearest list. Measured by the live sweep, twice, on two models.
+        return _uncurated_role(llm, route, conversation, question)
+    if read:
+        # No alias on disk covered the words, and the `read_turn` skill read
+        # them as one of the six -- by id, from the closed list, above the
+        # confidence floor. Acted on AND confirmed back, exactly as a role
+        # reading is: the student sees what was read and how to say no.
+        reply = industry_roles_reply(conversation, read, route.confidence)
+        said = " ".join((route.industry or "").split())[:60]
+        if said and said.lower() != read["label"].lower():
+            reply.body = INDUSTRY_READING_NOTE.format(
+                said=said, label=read["label"]) + reply.body
+        return reply
     return industry_menu_reply(conversation, router.INDUSTRY, route.confidence)
 
 
@@ -1585,7 +1661,9 @@ def _answer_combination(llm, route, conversation, question, history):
         # and then re-ran the same lookup -- by which time `what-work` was
         # already marked as asked, so the second pass could only refuse.
         return spine
-    industry = resolve_industry(route.industry or question)
+    industry = (resolve_industry(route.industry or question)
+                or (electives.industry_by_id(route.industry_id)
+                    if route.industry_id else None))
     label = (industry or {}).get("label") or route.industry or "industry"
     ranked = [r["id"] for r in industry["roles"]] if industry else []
     if industry and route.role_id in ranked:
@@ -1612,18 +1690,10 @@ def _answer_combination(llm, route, conversation, question, history):
 # Route: a factual question about a course
 # ---------------------------------------------------------------------------
 
-FACTUAL_SYSTEM = (
-    "You are THRIVE, answering a Rady MSBA student's factual question about "
-    "courses.\n\n"
-    "ABSOLUTE RULE: answer ONLY from the catalog entries and numbered passages "
-    "below. Never state a unit count, a prerequisite, a quarter, a deadline or "
-    "a policy that is not written there. Where the material does not say, say "
-    "that it does not say — and for prerequisites, enrolment consent or "
-    "approvals, send them to MSBA advising (bookable from the Appointments "
-    "tab) rather than inferring.\n\n"
-    "Name courses by code. Cite numbered passages like [1] where you used one. "
-    "Be concise — at most four sentences or a short list. Do not recommend "
-    "courses and do not ask a question back.")
+# The prompt lives in `skills/answer_course_facts/SKILL.md`. The catalog rows
+# and retrieved passages are rendered into it, and the skill's rule is that
+# they are the whole of what the model may say.
+ANSWER_COURSE_FACTS = "answer_course_facts"
 
 FACTUAL_REFUSAL = (
     "I don't have catalog or syllabus material that answers that, and I'd "
@@ -1650,17 +1720,14 @@ def _answer_factual(llm, route, question, history):
     if not catalog and not hits:
         return BotReply(FACTUAL_REFUSAL, [], "refusal", route=router.FACTUAL,
                         route_confidence=route.confidence, refused=True)
-    system = FACTUAL_SYSTEM
-    if catalog:
-        system += f"\n\nCatalog entries:\n\n{catalog}"
-    if hits:
-        system += f"\n\nContext passages:\n\n{build_context(hits)}"
     messages = (history[-config["max_history_turns"]:]
                 + [{"role": "user", "content": question}])
-    try:
-        body = (llm.chat(system, messages) or "").strip()
-    except Exception:
-        body = ""
+    body = reading.say(
+        ANSWER_COURSE_FACTS, llm, messages,
+        catalog=(f"Catalog entries:\n\n{catalog}" if catalog
+                 else "Catalog entries: none matched."),
+        passages=(f"Context passages:\n\n{build_context(hits)}" if hits
+                  else "Context passages: none matched."))
     if not body:
         return BotReply(FACTUAL_REFUSAL, [], "refusal", route=router.FACTUAL,
                         route_confidence=route.confidence, refused=True)
@@ -1683,8 +1750,13 @@ def _answer_situational(llm, route, conversation, question):
     intake = planner.load_session_intake(conversation) or {}
     if not stored.get("track") and intake.get("track"):
         stored = {**stored, "track": intake["track"]}
-    body, asked, resolved = situation.answer(llm, conversation.user, question,
-                                             stored)
+    # A route the model classified already carries the position it read
+    # (`Route.position`); the rule-ruled route and the awaiting shortcut do
+    # not, and read it once inside `situation.answer`.
+    body, asked, resolved = situation.answer(
+        llm, conversation.user, question, stored,
+        context=turn_context(conversation, intake),
+        said=route.position if route.confidence is not None else None)
     # Written whether or not anything was asked: a partial position is exactly
     # what the next turn needs, and a resolved one lets a follow-up ("what if I
     # take 16 units in Spring?") skip the extraction entirely. `awaiting` is
@@ -1820,6 +1892,68 @@ UNCLEAR_OPENING = (
     "to take in one particular quarter — and I'll start there instead.")
 
 
+MENU_WHICH = (
+    "I couldn't tell which of those you meant — more than one fits. Say its "
+    "number, or the title as it appears in the list.")
+
+
+# A greeting gets greeted back, and THEN the three ways in -- in different
+# words from the opening, which the student has just read. Measured live: "hi"
+# was answered with the opening's own paragraph re-phrased, so the second
+# message read as the first one repeating itself.
+_HELLOS = frozenset({
+    "hi", "hii", "hiya", "hey", "heya", "hello", "helo", "yo", "sup",
+    "morning", "afternoon", "evening", "good morning", "good afternoon",
+    "good evening", "hi there", "hey there", "hello there", "what's up",
+    "whats up",
+})
+_HOW_ARE_YOU = frozenset({"how are you", "how's it going", "hows it going"})
+
+GREETING_HELLO = "Hi! Good to have you here."
+GREETING_HOW_ARE_YOU = "Doing well, thanks for asking!"
+GREETING_ACK = "Great."
+
+GREETING_WAYS_IN = (
+    "So — where do you want to start?\n\n"
+    "- **Got a job in mind?** Tell me the title and your track — _\"11 month, "
+    "data scientist\"_ — and I'll build the whole plan.\n"
+    "- **Know the field, not the job?** Name it — _healthcare_, _fintech_, "
+    "_consulting_ — and I'll show you the roles it hires MSBA graduates into.\n"
+    "- **No idea yet?** Completely fine — just say so and we'll go through the "
+    "six industries together.\n\n"
+    "And if there's a course question on your mind first, ask away.")
+
+GREETING_THEN_TRACK = (
+    "Which track are you on — the **11-month** or the **17-month**? Say it "
+    "and I'll lay the plan out.")
+GREETING_THEN_GOAL = (
+    "What are you aiming for after the programme — a job title, an industry, "
+    "or not sure yet? Any of those works.")
+GREETING_THEN_LOAD = (
+    "Whenever you're ready: **light**, **moderate** or **heavy** for the "
+    "load, and the plan follows.")
+
+
+def _greeting_reply(question, answers):
+    """Greet back, then ask for the next thing -- never the opening again."""
+    lowered = " ".join(re.sub(r"[^a-z' ]+", " ", (question or "").lower()).split())
+    if lowered in _HOW_ARE_YOU:
+        opener = GREETING_HOW_ARE_YOU
+    elif lowered in _HELLOS:
+        opener = GREETING_HELLO
+    else:
+        opener = GREETING_ACK
+    if answers.get("goals") and answers.get("track"):
+        body = GREETING_THEN_LOAD
+    elif answers.get("goals"):
+        body = GREETING_THEN_TRACK
+    elif answers.get("track"):
+        body = GREETING_THEN_GOAL
+    else:
+        body = GREETING_WAYS_IN
+    return BotReply(f"{opener}\n\n{body}", [], "greeting", route=router.UNCLEAR)
+
+
 def _decline(route, llm, conversation, question, answers):
     if route.name == router.DEGRADED:
         # Never `refused`: the corpus is fine, we could not reach the model.
@@ -1843,10 +1977,33 @@ def _decline(route, llm, conversation, question, answers):
         reply.route = route.name
         reply.route_confidence = route.confidence
         return reply
+    if router.is_greeting(question):
+        return _greeting_reply(question, answers)
+    if (route.name == router.UNCLEAR and route.unmatched_role
+            and _looks_like_a_job_title(route.unmatched_role)
+            and router.names_a_job_function(route.unmatched_role)):
+        # The reading was unclear about the ROUTE but read a job the profiles
+        # do not cover. That is an uncovered job, refused as one -- not a
+        # reason to re-ask what the student is aiming for.
+        return _uncurated_role(llm, route, conversation, question)
     if route.name == router.OUT_OF_SCOPE:
         return BotReply(OUT_OF_SCOPE, [], "out-of-scope",
                         route=router.OUT_OF_SCOPE,
                         route_confidence=route.confidence, refused=True)
+    menu = (planner.load_session_intake(conversation) or {}).get("menu")
+    if menu in ("industries", "roles"):
+        # A list is on screen and the turn could not be placed against it --
+        # "the analyst one" on a list with four analyst titles. Measured
+        # live, this fell through to the generic opening, which asks for a
+        # job title and a track as though the list had never been shown.
+        # The honest reply is about the list: which one.
+        if menu == "industries":
+            replies = industry_buttons()
+        else:
+            replies = [_button(title_case(title)) for title, _ in
+                       electives.top_titles_for(answers.get("industry"), 10)]
+        return BotReply(MENU_WHICH, [], "menu-which", replies,
+                        route=router.UNCLEAR, route_confidence=route.confidence)
     if not answers.get("track") and not answers.get("goals"):
         # `model_note` is what stops `_with_a_way_back` adding the offer to
         # plan underneath: this reply already IS that offer.
@@ -2138,7 +2295,7 @@ def _with_a_way_back(conversation, answers, reply):
     """Append the offer to plan, at most twice per conversation."""
     if reply.route not in _DETOURS or reply.model_note == "unclear-opening":
         return reply
-    if reply.model_note in ("industry-menu", "industry-roles",
+    if reply.model_note in ("industry-menu", "industry-roles", "menu-which", "greeting",
                             "compare-roles", "compare-industries",
                             "small-talk", "degree-fact"):
         # A menu ends with its own instruction -- "pick one and I'll show you
@@ -2166,6 +2323,272 @@ def _with_a_way_back(conversation, answers, reply):
         reply.body += nudge
         return reply
     return reply
+
+
+# ---------------------------------------------------------------------------
+# What the model is told about the conversation before it reads a turn
+# ---------------------------------------------------------------------------
+
+def turn_context(conversation, answers):
+    """The planner's own records, for the `read_turn` skill.
+
+    A one-word answer means nothing without the question it answers. The
+    rules never had this: `load_intent` had to be told by its caller whether
+    the load question was pending, and `_BARE_TRACK` reasons at length about
+    why a lone "17" can only be a track. The skill is simply TOLD what was
+    asked, what is on file and what is on screen, and reads the turn in that
+    light. Every line is a fact from this module's own state, never anything
+    the student typed, and it is labelled as such in the prompt.
+    """
+    answers = answers or {}
+    context = {}
+    awaiting = planner.load_session_situation(conversation).get("awaiting")
+    if awaiting == "track":
+        pending = "which track they are on now (11-month or 17-month)"
+    elif awaiting == "quarter":
+        pending = "which quarter they are in right now"
+    elif (answers.get("track") and (answers.get("goals")
+                                    or answers.get("unmatched_goal"))
+          and not answers.get("workload")
+          and planner.session_has_asked(conversation, "workload")):
+        pending = "how they want the load spread (light, moderate or heavy)"
+    elif answers.get("goals") and not answers.get("track"):
+        pending = "which track they are on (11-month or 17-month)"
+    elif answers.get("track") and not answers.get("goals") \
+            and not answers.get("unmatched_goal"):
+        pending = "what they are aiming for after the programme (a job title or an industry)"
+    else:
+        pending = ""
+    context["question the planner asked last"] = pending or "none"
+    on_file = []
+    if answers.get("track"):
+        on_file.append(f"track {answers['track']}")
+    for role_id in answers.get("goals") or []:
+        label = (load_careers().get(role_id) or {}).get("label")
+        if label:
+            on_file.append(f"goal {label}")
+    if answers.get("unmatched_goal"):
+        on_file.append(f"goal {answers['unmatched_goal']} (no curated profile)")
+    if answers.get("workload"):
+        on_file.append(f"load {answers['workload']}")
+    context["on file"] = "; ".join(on_file) or "nothing yet"
+    menu = answers.get("menu")
+    if menu == "industries":
+        context["menu on screen"] = "industries: " + "; ".join(
+            f"{i}. {industry['label']}"
+            for i, industry in enumerate(electives.load_industries(), 1))
+    elif menu == "roles" and answers.get("industry"):
+        industry = electives.industry_by_id(answers["industry"]) or {}
+        context["menu on screen"] = (
+            f"job titles in {industry.get('label', answers['industry'])}: "
+            + "; ".join(f"{i}. {title_case(title)}" for i, (title, _role) in
+                        enumerate(electives.top_titles_for(answers["industry"], 10), 1)))
+    if planner.next_intake_step(answers) is None and planner.session_has_asked(
+            conversation, "plan"):
+        from rsm_thrive.models import CoursePlan
+
+        # Read-only. `save_intake` would also hand back the swaps, but it
+        # writes the committed plan as a side effect, and describing the
+        # screen to the model must not change what is on it.
+        record = CoursePlan.objects.filter(user=conversation.user).first()
+        plan = planner.build_for(answers, planner.taken_course_ids(conversation.user),
+                                 record.selections if record else None)
+        rows = []
+        for quarter in plan.get("quarters") or []:
+            for row in quarter.get("courses") or []:
+                if row.get("code"):
+                    rows.append(f"{row['code']} ({quarter['label']}) {row.get('title', '')}".strip())
+        context["plan on screen"] = "yes: " + "; ".join(rows) if rows else "yes"
+        review = planner.load_session_review(conversation)
+        if review is not None:
+            index = min(review.get("index", 0), max(len(plan["quarters"]) - 1, 0))
+            if plan.get("quarters"):
+                context["walk-through"] = (
+                    f"quarter on screen is {plan['quarters'][index]['label']}")
+    else:
+        context["plan on screen"] = "no"
+    return context
+
+
+# ---------------------------------------------------------------------------
+# Acting on what the skill read
+# ---------------------------------------------------------------------------
+
+# The acts that STATE something. A question mentions values without choosing
+# them (`planner.merge_intake` says why), a greeting states nothing, and a
+# decline is recorded as an answer to the pending question rather than as a
+# value for it.
+_STATING_ACTS = frozenset({"answer", "request", "correct", "accept", "chat", ""})
+
+
+def _stated_by(route, question):
+    """The intake values a model-read turn actually STATED, or {}.
+
+    Two guards on top of the validators. A question states nothing -- the
+    act says so, or the turn's own shape does (`planner.is_question`). And
+    the situational route reads its own position and syncs the track back
+    itself, so its turn is left to it rather than written twice.
+
+    The GOAL is deliberately never taken from here. A role the model read
+    goes through `_answer_role`, which confirms the reading back before
+    anything is built on it; putting it straight on file would build the plan
+    on a reading the student never saw.
+    """
+    if route.act not in _STATING_ACTS or planner.is_question(question):
+        return {}
+    if route.name in (router.SITUATIONAL, router.OUT_OF_SCOPE, router.DEGRADED):
+        return {}
+    learned = dict(route.learned)
+    if route.action.get("name") == "set_load" or route.action.get("load"):
+        # "make this one lighter" mid-walk-through: the reading carried
+        # both a load and a plan action, and writing the load to the intake
+        # rebuilt the WHOLE plan light before the action could move one
+        # quarter. A load that arrives with a plan action belongs to it.
+        learned.pop("workload", None)
+    return learned
+
+
+def _learned_from_route(conversation, question, answers, route):
+    """Put on file whatever the reading says the turn stated, or None.
+
+    The rules already had one pass at this turn (`_intake_progress` with
+    `learned_from`) and found nothing they were sure of. This is the second
+    pass, with what the `read_turn` skill saw and the validators kept. Same
+    machinery, same questions, same plan -- only the reader differs.
+    """
+    learned = _stated_by(route, question)
+    if not learned:
+        return None
+    return _intake_progress(conversation, question, answers, learned=learned)
+
+
+def _plan_is_imminent(conversation, answers):
+    """Will the next turn deliver the plan whatever it says?
+
+    True once a track and a goal are on file, the plan has not been shown,
+    and nothing is left to ask -- the load is on file, or has been asked, or
+    is not a choice on this track. `_intake_progress` treats any turn in this
+    state as the cue to build, which is right (an interview with no exit is
+    the thing being removed) and is also the one moment a remark the rules
+    cannot read costs the student something: it is built into the plan or
+    it is lost.
+    """
+    answers = answers or {}
+    track = answers.get("track")
+    if not track or not (answers.get("goals") or answers.get("unmatched_goal")):
+        return False
+    if planner.session_has_asked(conversation, "plan"):
+        return False
+    return bool(answers.get("workload")
+                or planner.session_has_asked(conversation, "workload")
+                or not planner.load_is_a_choice(track))
+
+
+def _plan_action(llm, conversation, question, answers, route):
+    """Do to the plan what the reading says the student asked, or None.
+
+    Mirrors `_maintenance` branch for branch and calls the same functions --
+    `_review_reply`, `_finalise_reply`, `_handle_change_request`,
+    `_apply_quarter_load`. Nothing here builds a plan differently; it only
+    reaches those functions from phrasings the word lists did not hold
+    ("yeah go ahead", "let's keep going", "can we make fall a bit easier").
+    Only with a plan on screen: without one there is nothing to act on.
+    """
+    action = route.action
+    if not action or planner.next_intake_step(answers) is not None:
+        return None
+    user = conversation.user
+    name = action["name"]
+    session = planner.load_session_review(conversation)
+    if name == "finalise":
+        return spoken(_finalise_reply(conversation, user, answers))
+    if name == "start_review":
+        return spoken(_review_reply(conversation, user, answers, 0))
+    if name == "next":
+        index = (session["index"] + 1) if session is not None else 0
+        return spoken(_review_reply(conversation, user, answers, index))
+    if name == "show_plan":
+        return spoken(_plan_reply(user, answers))
+    if name == "switch_route" and action.get("route_choice"):
+        said = ("use the recommended bundle" if action["route_choice"] == "fixed"
+                else "build it around me")
+        return _maintenance(llm, conversation, said, answers)
+    if name == "set_load" and action.get("load"):
+        track = answers.get("track") or "11 month"
+        keys = planner.quarter_keys(track)
+        # The quarter from the reading, or from the turn itself. Measured
+        # live: "can we make fall a bit easier" came back with the load and
+        # an empty quarter, and lightening the WHOLE plan for that is the
+        # wrong answer to a question about one quarter. Quarter names are a
+        # closed set, so the turn's own words are checked before the plan is.
+        quarter_key = (planner.resolve_quarter(track, action.get("quarter"))
+                       or planner.resolve_quarter(track, router.named_quarter(question)))
+        if quarter_key is None and session is not None:
+            quarter_key = keys[min(session["index"], len(keys) - 1)]
+        if quarter_key in keys:
+            return _apply_quarter_load(conversation, answers,
+                                       keys.index(quarter_key), action["load"])
+        if not planner.load_is_a_choice(track):
+            return BotReply(LOAD_FIXED_TRACK_SAID_NOTE.format(
+                load=action["load"], track=track).strip(), [], "plan",
+                route="plan")
+        # The whole plan: a new overall preference, re-seeded across the
+        # quarters exactly as a first answer to the load question would be.
+        merged = {**answers, "workload": action["load"]}
+        merged.pop("quarter_units", None)
+        merged.pop("quarter_loads", None)
+        return _plan_now(conversation, merged, answers)
+    codes = action.get("courses") or []
+    if name in ("swap", "alternatives") and codes:
+        changed = _handle_change_request(user, answers, " ".join(codes))
+        if changed is not None:
+            return changed
+        available = _course_availability(user, answers, " ".join(codes))
+        if available is not None:
+            return available
+    if name == "explain" and codes:
+        return _explain_course(user, answers, codes[0])
+    return None
+
+
+def _menu_action(llm, conversation, question, history, answers, route):
+    """Act on a menu pick the skill read, or None.
+
+    `pick_by_number`, `role_from_industry_menu` and `wants_a_comparison` read
+    the exact shapes -- a bare number, a title typed verbatim, an ordinal --
+    and run before any model call. This is for the rest: "the analyst one",
+    "the last two", "compare fintech and consulting". The skill saw the menu
+    numbered in its context and reports positions; positions are checked
+    against the list actually on screen, and the reply is the one the
+    deterministic pick would have produced.
+    """
+    if not route.menu_pick:
+        return None
+    stored = planner.load_session_intake(conversation) or {}
+    menu = stored.get("menu")
+    if menu == "industries":
+        industries = electives.load_industries()
+        chosen = [industries[n - 1] for n in route.menu_pick if n <= len(industries)]
+        if route.menu_compare and len(chosen) >= 2:
+            return comparison_reply(conversation, "industries", chosen[:3],
+                                    route.confidence)
+        if len(chosen) == 1:
+            return industry_roles_reply(conversation, chosen[0], route.confidence)
+        return None
+    if menu == "roles" and stored.get("industry"):
+        titles = electives.top_titles_for(stored["industry"], 10)
+        chosen = list(dict.fromkeys(
+            titles[n - 1][1] for n in route.menu_pick if n <= len(titles)))
+        if route.menu_compare and len(chosen) >= 2:
+            return comparison_reply(conversation, "roles", chosen[:3],
+                                    route.confidence)
+        if len(chosen) == 1:
+            return _answer_role(
+                llm, router.Route(router.ROLE, role_id=chosen[0],
+                                  confidence=route.confidence,
+                                  why="picked from the menu; read by the skill"),
+                conversation, question, history)
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -2390,7 +2813,14 @@ def answer(llm, conversation, question, history):
     # through to the router, which has a combination route for exactly that.
     if ruled is None and not router.matched_role(question):
         named = resolve_industry(question)
-        if named:
+        # A JOB whose words happen to contain a sector of the catch-all
+        # industry is not an industry question. "sports scientist" carries
+        # "sports", which lists under "Other (media, gaming, ... sports)",
+        # and this shortcut answered a job we do not cover with that list's
+        # ten titles -- the redirect the refusal rule forbids. A job function
+        # plus the catch-all goes to the router, which refuses it honestly.
+        if (named and not (named["id"] == "other"
+                           and router.names_a_job_function(question))):
             return _with_a_way_back(
                 conversation, answers,
                 industry_roles_reply(conversation, named))
@@ -2408,12 +2838,85 @@ def answer(llm, conversation, question, history):
                               why="answering a question this route asked"),
             conversation, question)
 
+    route = None
+    if (ruled is not None and ruled.name in (router.ROLE, router.COMBINATION)
+            and planner.next_intake_step(answers) is None
+            and reading.courses_of([router.matched_title(question)])):
+        # A PROFILE ALIAS THAT IS ALSO A COURSE TITLE, with a plan on screen.
+        # "can i drop the web mining class and take fraud analytics instead"
+        # names MGTA 463 -- and "fraud analytics" is how `careers.json` spells
+        # the Risk & Fraud profile, so the rule switched the student's career
+        # and rebuilt the plan. The rule cannot tell a course from a career
+        # here; the skill can, and is asked. A plan action wins; anything
+        # else leaves the goal switch to run exactly as before.
+        route = router.model_route(llm, question, turn_context(conversation, answers))
+        acted = _plan_action(llm, conversation, question, answers, route)
+        if acted is not None:
+            if not acted.route:
+                acted.route = "plan"
+            return acted
+        route = None
     if ruled is None or ruled.name in (router.ROLE, router.COMBINATION):
-        progressed = _intake_progress(conversation, question, answers)
-        if progressed is not None:
-            return progressed
+        learned = None
+        if (ruled is None and _plan_is_imminent(conversation, answers)
+                and not learned_from(question)):
+            # THE NEXT TURN DELIVERS THE PLAN WHATEVER IT SAYS -- the load
+            # question has been asked, and the exit from it is that any
+            # answer produces the plan with what was assumed said out loud.
+            # Read the turn before that happens, so what it states is the
+            # load the plan is built on rather than a remark the plan ignored.
+            #
+            # The skill is consulted even when `load_mentioned` would find a
+            # word, because a word is not a preference. Measured live: "not
+            # too heavy please, i work part time" was built as HEAVY -- the
+            # loose reader saw "heavy" and could not see "not". The skill
+            # reads it as light; the word-match stays as the fallback inside
+            # `_intake_progress` for when the skill reads nothing at all.
+            route = router.classify(llm, question,
+                                    turn_context(conversation, answers))
+            learned = dict(_stated_by(route, question))
+            if route.act == "ask":
+                # A QUESTION IS NOT THE CUE TO BUILD. "does heavy mean more
+                # classes?" was answered with the whole plan, spread the
+                # assumed way, and the question went unanswered. About the
+                # load options it gets the answer here; about anything else
+                # it takes its route, and the plan waits one more turn.
+                if _QUARTER_LOAD_WORD.search(question or ""):
+                    return BotReply(LOAD_EXPLAINED, [], "intake", route="plan")
+                learned = None
+        if learned is not None or route is None:
+            progressed = _intake_progress(conversation, question, answers,
+                                          learned=learned)
+            if progressed is not None:
+                return progressed
 
-    route = ruled or router.classify(llm, question)
+    read_early = route is not None
+    route = ruled or route or router.classify(llm, question,
+                                              turn_context(conversation, answers))
+    if ruled is None:
+        # The model read the turn, and a reading carries more than a route.
+        # Whatever it STATED goes on file, whatever it asked of the plan on
+        # screen is done, and "I don't know yet" gets the menu -- each through
+        # the same code the rules reach, from phrasings the rules did not
+        # hold. The handler below still runs when none of these answers.
+        acted = None
+        if not read_early:
+            acted = _learned_from_route(conversation, question, answers, route)
+        if acted is None:
+            acted = _plan_action(llm, conversation, question, answers, route)
+        if acted is None:
+            acted = _menu_action(llm, conversation, question, history, answers, route)
+        if acted is not None:
+            if not acted.route:
+                acted.route = "plan"
+            return acted
+        if (route.wants_menu and route.name in (router.UNCLEAR, router.INDUSTRY,
+                                                router.ROLE)
+                and not route.role_id and not route.industry
+                and not answers.get("goals")):
+            return _with_a_way_back(conversation, answers,
+                                    industry_menu_reply(conversation, route.name,
+                                                        route.confidence))
     handler = HANDLERS.get(route.name)
     if handler is None:
         return _with_a_way_back(

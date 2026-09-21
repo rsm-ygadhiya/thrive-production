@@ -34,10 +34,10 @@ import json
 from functools import lru_cache
 from pathlib import Path
 
-from rsm_thrive.services.electives import (catalog_version, load_catalog,
+from rsm_thrive.services.courses.electives import (catalog_version, load_catalog,
                                             resolve_role)
 
-_DATA = Path(__file__).resolve().parent.parent / "data" / "catalog"
+_DATA = Path(__file__).resolve().parents[2] / "data" / "catalog"
 
 # The Summer slot is pre-placed by the published plan (MGTA 403 + MGTA 464), so
 # a bundle never has to find room for 464 -- it is already in every plan.
@@ -100,7 +100,7 @@ def _quarter_budgets(skeleton, track):
     measured by the plan sweep, a light Fall on the 17-month track came back
     at 10 units, which is below the load a graduate student may enrol in.
     """
-    from rsm_thrive.services.planner import adjustable_quarters, tail_quarter_key
+    from rsm_thrive.services.courses.planner import adjustable_quarters, tail_quarter_key
 
     bounds = {q["key"]: q for q in adjustable_quarters(track)}
     tail = tail_quarter_key(track)
@@ -189,6 +189,110 @@ def _place(courses, budgets, flex=None, rigid=()):
     return assigned if recurse(0) else None
 
 
+def _fillable(budgets, exclude):
+    """Per quarter: can a 4-unit / 2-unit elective from OUTSIDE this set fill it?
+
+    A free slot is only worth cutting where the scorer can actually fill it --
+    a 2-unit Winter slot has exactly one candidate in the catalog, and if the
+    bundle already holds it the slot would come back "nothing available".
+    """
+    out = {}
+    for row in budgets:
+        sizes = {}
+        for size in (4, 2):
+            sizes[size] = any(
+                course["units"] == size and not course["is_core"]
+                and course["id"] not in exclude
+                and any((o.get("season") or "").upper() == row["season"]
+                        for o in course.get("offerings") or [])
+                for course in load_catalog())
+        out[row["key"]] = sizes
+    return out
+
+
+def _bounds(budgets, flex, rigid):
+    """(floor, ceiling) per quarter, the flex applied INSIDE the legal range --
+    exactly as `_place` does it, so a partial fill obeys the same limits."""
+    rigid = set(rigid)
+    give = {row["key"]: (0 if row["key"] in rigid else flex) for row in budgets}
+    ceiling = {row["key"]: min(row["budget"] + give[row["key"]], row["ceiling"])
+               for row in budgets}
+    floor = {row["key"]: max(row["budget"] - give[row["key"]], row["floor"], 0)
+             for row in budgets}
+    return floor, ceiling
+
+
+def _distribute(load, budgets, fill, target, floor, ceiling):
+    """Free 4- and 2-unit slots that bring `load` up to `target` exactly.
+
+    Published budget first, then up to each quarter's ceiling; every quarter
+    must end at or above its floor. None when the leftover cannot be cut into
+    fillable pieces.
+    """
+    leftover = target - sum(load.values())
+    if leftover < 0:
+        return None
+    free = {row["key"]: [] for row in budgets}
+    load = dict(load)
+    by_room = sorted(budgets, key=lambda row: -(row["budget"] - load[row["key"]]))
+    for limit in ("budget", "ceiling"):
+        for size in (4, 2):
+            for row in by_room:
+                key = row["key"]
+                cap = row["budget"] if limit == "budget" else ceiling[key]
+                while (leftover >= size and load[key] + size <= cap
+                       and fill[key][size]):
+                    free[key].append(size)
+                    load[key] += size
+                    leftover -= size
+    if leftover:
+        return None
+    if any(load[key] < floor[key] for key in load):
+        return None
+    return free
+
+
+def _place_partial(courses, budgets, fill, target, flex, rigid=()):
+    """Assign `courses` to quarters and fill what is left with free slots.
+
+    (assigned, free) or None. Same per-quarter limits as `_place` -- the
+    published budget give or take `flex`, inside the legal range, the `rigid`
+    quarters exact -- so a plan built this way drifts no further from the
+    chosen load than a fully placed bundle would. `_distribute` then has to
+    close the total exactly with slots the scorer can fill, and every
+    assignment is tried until one lets it.
+    """
+    order = sorted(courses, key=lambda c: (len(_seasons(c)), -_units(c)))
+    assigned = {row["key"]: [] for row in budgets}
+    load = {row["key"]: 0 for row in budgets}
+    floor, ceiling = _bounds(budgets, flex, rigid)
+    season_of = {row["key"]: row["season"] for row in budgets}
+    found = {}
+
+    def recurse(index):
+        if index == len(order):
+            free = _distribute(load, budgets, fill, target, floor, ceiling)
+            if free is None:
+                return False
+            found["free"] = free
+            return True
+        course = order[index]
+        for key in load:
+            if season_of[key] not in _seasons(course):
+                continue
+            if load[key] + _units(course) > ceiling[key]:
+                continue
+            load[key] += _units(course)
+            assigned[key].append(course)
+            if recurse(index + 1):
+                return True
+            assigned[key].pop()
+            load[key] -= _units(course)
+        return False
+
+    return (assigned, found["free"]) if recurse(0) else None
+
+
 def _rebudgeted(skeleton, wanted_units):
     """The published skeleton with each quarter's TOTAL set to the chosen load.
 
@@ -227,7 +331,7 @@ def _substitute_for(role_id, course_id, used):
     are built on it, and a 2-unit swap for a 4-unit anchor unbalances a plan
     that has to close at exactly 50.
     """
-    from rsm_thrive.services.electives import (load_careers, load_catalog,
+    from rsm_thrive.services.courses.electives import (load_careers, load_catalog,
                                                rank_electives)
 
     catalog = _by_id()
@@ -293,12 +397,12 @@ def choose_courses(role_id, track, taken_ids=frozenset(), wanted_units=None):
     be scheduled on this track once the student's completed courses are
     excluded.
     """
-    from rsm_thrive.services.planner import TRACK_SKELETONS
+    from rsm_thrive.services.courses.planner import TRACK_SKELETONS
 
     bundle = bundle_for(role_id)
     skeleton = TRACK_SKELETONS.get(track)
     if not bundle or skeleton is None:
-        return None, None
+        return None, None, None
 
     budgets = _quarter_budgets(_rebudgeted(skeleton, wanted_units), track)
     target = sum(row["budget"] for row in budgets)
@@ -313,13 +417,19 @@ def choose_courses(role_id, track, taken_ids=frozenset(), wanted_units=None):
 
 
 def _search(role_id, required, bundle, budgets, target, taken_ids, usable):
-    """The combination search, for one `required` spine."""
+    """The combination search, for one `required` spine.
+
+    Returns (courses, placement, free): the bundle courses chosen, where each
+    sits, and any free slots {quarter: [units, ...]} left for the scorer.
+    `free` is empty whenever the whole set could be placed.
+    """
     optional = [c for c in bundle["differentiator"]
                 if usable(c) and c not in required]
     optional = list(dict.fromkeys(optional))
     needed = target - sum(_units(c) for c in required)
     if needed < 0:
-        return None, None
+        return None, None, None
+    no_free = {row["key"]: [] for row in budgets}
 
     # Exact per-quarter loads FIRST, then with the flex.
     #
@@ -368,8 +478,53 @@ def _search(role_id, required, bundle, budgets, target, taken_ids, usable):
                 courses = required + list(combination)
                 placement = _place(courses, budgets, flex, rigid)
                 if placement is not None:
-                    return courses, placement
-    return None, None
+                    return courses, placement, no_free
+
+    # THE PARTIAL RUNGS. The rungs above need the differentiators to close
+    # the budget exactly, in the quarters everything is taught. With the
+    # catalog holding each course's REAL terms rather than "varies" for every
+    # quarter, that is often impossible -- Business Analyst's spine plus every
+    # differentiator it lists leaves Spring six units short, because none of
+    # them runs in Spring. The whole bundle was then abandoned for the generic
+    # ranked fill, silently, for 54 of 84 role/track/load combinations.
+    #
+    # So: keep the spine and as many differentiators as the timetable holds
+    # (most first, MSBA courses first among equals), and cut FREE slots for
+    # the rest, which `build_plan` fills with the best fit for the goal. Only
+    # if even the spine cannot be laid in are anchors given up, fewest first
+    # -- the universal pair is never dropped. Whatever is left out is reported
+    # on the plan (`bundleUnplaced`), never just missing.
+    fill = _fillable(budgets, set(required) | set(optional) | set(taken_ids)
+                     | PRE_PLACED)
+    anchors = [c for c in required if c in (bundle.get("anchor") or [])]
+    spines = [required]
+    for drop_count in range(1, len(anchors) + 1):
+        # Give up the courses from OUTSIDE the MSBA first. Data Scientist on
+        # the 11-month track has MGTA 461, CSE 251A and MGTA 402 all taught in
+        # Fall only, and Fall cannot hold the three; the programme's own
+        # course is the one a student can rely on registering for.
+        for dropped in sorted(itertools.combinations(anchors, drop_count),
+                              key=lambda combo: (
+                                  -sum(1 for c in combo if not c.startswith("MGTA")),
+                                  combo)):
+            spines.append([c for c in required if c not in dropped])
+    for spine in spines:
+        room = target - sum(_units(c) for c in spine)
+        if room < 0:
+            continue
+        for flex, rigid in rungs:
+            for count in range(len(optional), -1, -1):
+                for combination in sorted(
+                        itertools.combinations(optional, count), key=outside_first):
+                    if sum(_units(c) for c in combination) > room:
+                        continue
+                    courses = spine + list(combination)
+                    result = _place_partial(courses, budgets, fill, target,
+                                            flex, rigid)
+                    if result is not None:
+                        placement, free = result
+                        return courses, placement, free
+    return None, None, None
 
 
 def skeleton_for(role_id, track, taken_ids=frozenset(), wanted_units=None):
@@ -390,13 +545,14 @@ def skeleton_for(role_id, track, taken_ids=frozenset(), wanted_units=None):
     Each shaped quarter also carries the chosen total, so `_resized` sees a
     skeleton already at the target and leaves it alone.
     """
-    from rsm_thrive.services.planner import TRACK_SKELETONS
+    from rsm_thrive.services.courses.planner import TRACK_SKELETONS
 
     skeleton = TRACK_SKELETONS.get(track)
     if skeleton is None:
         return None, None, None
     skeleton = _rebudgeted(skeleton, wanted_units)
-    courses, placement = choose_courses(role_id, track, taken_ids, wanted_units)
+    courses, placement, free = choose_courses(role_id, track, taken_ids,
+                                              wanted_units)
     if courses is None:
         return None, None, None
 
@@ -412,6 +568,10 @@ def skeleton_for(role_id, track, taken_ids=frozenset(), wanted_units=None):
             slots.append({"kind": "elective", "units": _units(course_id)})
             selections.setdefault(quarter["key"], {})[
                 str(len(slots) - 1)] = course_id
+        # Free slots -- the part of the budget the bundle could not fill in
+        # this quarter. Unpinned, so `build_plan` fills them by fit.
+        for units in sorted((free or {}).get(quarter["key"], []), reverse=True):
+            slots.append({"kind": "elective", "units": units})
         shaped.append({**quarter, "slots": slots})
     return shaped, selections, courses
 

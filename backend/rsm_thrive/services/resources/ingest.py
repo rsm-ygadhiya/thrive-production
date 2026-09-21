@@ -83,6 +83,14 @@ def embedding_text(chunk):
     """
     heading = (chunk.get("heading") or "").strip()
     text = chunk.get("text") or ""
+    # The DOCUMENT title is deliberately NOT added, though it looks like it
+    # should be: 44% of chunks carry a heading of two words or fewer and 11%
+    # carry none, so "$1,571.00 Per Unit" sits under "Annual Total" with nothing
+    # tying it to fees or the MSBA. Tried and measured 2026-08-31 -- the golden
+    # eval went 6/9 to 5/9, losing a case that had been passing. A static
+    # embedding averages its tokens, so a title on every chunk adds the same
+    # vector everywhere and dilutes what actually distinguishes one chunk from
+    # the next. The context problem is real; this is not the fix for it.
     return f"{heading}\n\n{text}" if heading else text
 
 

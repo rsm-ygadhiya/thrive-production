@@ -21,7 +21,7 @@ import pytest
 from django.contrib.auth.models import User
 
 from rsm_thrive.models import Conversation, PlannerSession
-from rsm_thrive.services import electives, orchestrator, planner
+from rsm_thrive.services.courses import electives, orchestrator, planner
 from rsm_thrive.services.llm import FakeLLM
 
 pytestmark = pytest.mark.django_db
@@ -406,7 +406,9 @@ class TestTheFinishingQuarterIsHeldByLoad:
         user = User.objects.create_user("tailer")
         conversation = Conversation.objects.create(user=user, destination="courses",
                                                    title="t")
-        for said in ("bi analyst", "17 month", "moderate"):
+        # Marketing Analyst: its Fall-taught courses are all needed earlier,
+        # so the final Fall can only carry 2 of the 4 the load asks for.
+        for said in ("marketing analyst", "17 month", "moderate"):
             reply = orchestrator.answer(FakeLLM([]), conversation, said, [])
         assert "carries **2 units** rather than the 4" in reply.body
         assert "taught in one term only" in reply.body
@@ -460,14 +462,19 @@ class TestTheBundleOutranksTheSpread:
                 assert on_goal / len(chosen) >= 0.5, \
                     f"{goal}/{load}: only {on_goal}/{len(chosen)} on-goal"
 
-    def test_dropping_the_spread_is_reported_not_silent(self):
-        """bi-analyst on the 17-month track: a light spread wants 12 / 12 /
-        14 / 4, and the bundle's Spring-offered courses cannot fill 14 there,
-        so the bundle wins and the plan says so. Moderate places as it is."""
-        dropped = self._plan("bi-analyst", "17 month", "light")
-        kept = self._plan("bi-analyst", "17 month", "moderate")
-        assert dropped["spreadDropped"] is True
-        assert kept["spreadDropped"] is False
+    def test_the_spread_no_longer_has_to_be_dropped(self):
+        """This used to show bi-analyst on a light 17-month spread losing the
+        spread to the bundle. With the catalog holding each course's real
+        terms, `bundles._search` fills what the set cannot reach with free
+        slots the scorer can, inside the chosen spread -- so no role, track
+        and load combination has to give the spread up any more, and every
+        plan still says which recommended courses were left out."""
+        for goal in electives.load_careers():
+            for track in ("11 month", "17 month"):
+                for load in ("light", "moderate", "heavy"):
+                    plan = self._plan(goal, track, load)
+                    assert plan["spreadDropped"] is False, (goal, track, load)
+                    assert isinstance(plan["bundleUnplaced"], list), (goal, track, load)
 
 
 class TestThePreferenceIsAskedFirst:
@@ -567,7 +574,7 @@ class TestThePreferenceIsAskedFirst:
         question becomes worth asking and this test should fail so somebody
         revisits it.
         """
-        from rsm_thrive.services.electives import load_catalog
+        from rsm_thrive.services.courses.electives import load_catalog
 
         electives = [c for c in load_catalog() if not c["is_core"]]
         light_courses = [c for c in electives if c.get("workload") == "light"]

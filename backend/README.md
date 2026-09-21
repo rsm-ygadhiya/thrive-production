@@ -28,7 +28,13 @@ Two knobs control the backend:
   without an API key; it also switches embeddings to `FakeEmbeddings` for
   retrieval.
 - `TRITONAI_API_KEY` — required when `THRIVE_LLM=tritonai` (or unset). Used
-  for chat completions (`TRITONAI_MODEL`, default `claude-sonnet-5`). It is
+  for chat completions (`TRITONAI_MODEL`, default `claude-sonnet-5`); the
+  Resources bot's question reading can run on a faster model via
+  `TRITONAI_READER_MODEL` (measured 2026-09-20: `gemini-3.5-flash` reads
+  `read_question` as well as claude-sonnet-5 in about half the time -- but
+  mapped an uncovered job onto a curated profile in the planner's
+  `read_turn`, so that reading, and every answer, stays on
+  `TRITONAI_MODEL`). It is
   **not** usable for embeddings: the key issued 2026-09-11 serves four chat
   models and no embedding model, so `THRIVE_EMBEDDINGS=local` is mandatory
   and `TRITONAI_EMBED_MODEL` is dead weight. Get a key
@@ -40,7 +46,7 @@ Two knobs control the backend:
 
 ### Retrieval: hybrid rank, two admission tiers, typo repair
 
-`rsm_thrive/services/retrieval.py` is not pure cosine search. Every question
+`rsm_thrive/services/resources/retrieval.py` is not pure cosine search. Every question
 is scored against every in-scope `DocumentChunk` two ways:
 
 - **Cosine similarity** against the question embedding — finds paraphrases.
@@ -128,37 +134,109 @@ a larger mixed corpus (e.g. the fixture plus `--catalog`) and fake-embedding
 retrieval dilutes, so several cases fail by design — run the eval against the
 corpus the goldens target, or grow/tune the goldens as the corpus grows.
 
-### Course planner: interview → 50-unit plan → swaps → review
+### Course surface: one orchestrator, six routes
 
-The `courses` destination (`answer_electives` in `rsm_thrive/services/bots.py`,
-engine in `rsm_thrive/services/planner.py`) runs a stateful interview scoped
-to one `Conversation`, not a one-shot goal extraction:
+The `courses` destination is dispatched by `rsm_thrive/services/courses/orchestrator.py`.
+There is no interview — a student types a real sentence and gets an answer to
+that sentence. `rsm_thrive/services/courses/router.py` classifies the question (rules
+first; one LLM call, running the `read_turn` skill, only for what the rules
+cannot decide — see [Skills](#skills-what-the-model-is-trusted-to-read)) and
+the orchestrator dispatches:
 
-1. **Interview** (4 steps, tracked in `PlannerSession.intake` per
-   conversation): track (11-month vs 17-month), career goal(s) (validated
-   against `careers.json`), self-rated skill levels (Python/SQL/statistics/ML/
-   communication, 1–5 — accepted as free text or via the chat UI's rating-form
-   quick action), and desired workload. Skill ratings left unanswered after
-   `MAX_STEP_ATTEMPTS` (2) are assumed rather than asked a third time; a track
-   or career goal is never assumed.
-2. **Plan** (`build_plan`): once the interview is complete, deterministically
-   lays out every quarter of the chosen track with **50 total units** (22
-   core + 28 elective, the degree requirement), core courses fixed and
-   elective slots filled toward the stated career goal, excluding courses the
-   student has already taken (`Enrollment`) and filtered by the catalog's
-   offering terms and the student's workload preference. Rendered as Markdown
-   (`render_plan_markdown`) with one table per quarter — the frontend's
-   `richtext.ts`/`RichMessage.svelte` renders these as real HTML tables, not
-   raw pipes.
-3. **Swaps**: a student can replace one elective in one quarter/slot
-   (`apply_swap`); every other auto-filled elective is pinned so the rest of
-   the schedule doesn't shift, and a rejected swap (course not offered that
-   quarter, duplicate, wrong slot) comes back as a `ValueError` message rather
-   than a silently wrong plan.
-4. **Review** (`PlannerSession.review`, `review_quarter`/`review_intent`): a
-   student can ask to "walk through it a quarter at a time" and get 3
-   alternatives per elective slot with what each course teaches, before
-   finalizing swaps — driven entirely through chat, not a separate UI.
+| Route | What answers it |
+| --- | --- |
+| `role` | The curated bundle from `bundles.json` for one of the 14 profiles in `careers.json`. **No model call at all** when the turn names a title, alias or shorthand the table lists — the mapping is authoritative and must not become probabilistic. When nothing on disk matches, the classifier is shown the 14 profiles and may read the student's words as one of them, by id from that closed list (`services/courses/understanding.py`); the code validates the id and the reply confirms the reading back. A job no profile covers is refused and names no course. |
+| `industry` | `grounded_course_advisor` — current skills for the field from the web, matched only against our catalog by `skill_match` (below). No catalog match means a refusal that names no course. |
+| `factual` | `courses.json` rows plus syllabus retrieval over the `courses` destination, answered under `FACTUAL_SYSTEM`. Nothing to ground it means a refusal, and the model is not even called. |
+| `combination` | Role determinism for the spine, industry context on the electives — in that order, so the deterministic half leads. |
+| `situational` | `rsm_thrive/services/courses/situation.py`. See below. |
+| `quarter` | One named quarter, planned on its own — "what should I take in Winter?", "just plan my spring". The whole plan is still built underneath (which electives are left in Winter depends on what Fall and Spring took); only that quarter is shown, with its own load question, and `next quarter` carries on from there. |
+| `out-of-scope` / `unclear` | Says so plainly, or asks once. A greeting is matched deterministically (no model call — measured at 1.8s to classify "hi"), and an `unclear` turn in a conversation that has established nothing re-asks the opening's two questions instead of showing a menu. |
+
+Every reply carries its `route` and (when a model decided) its confidence onto
+`ChatTurnLog`, so a bad answer is a finding about a route rather than a
+complaint about a black box. A rule's confidence is `None`, not `1.0`.
+
+**The rule the whole surface holds:** no fact about a course, a unit count, a
+prerequisite or a deadline is stated unless it came from the catalog, the
+published skeletons, or a retrieved passage. The model interprets and explains;
+it never asserts a number.
+
+#### Skills: what the model is trusted to read
+
+Every prompt the two bots give the model is a skill: one folder with a
+`SKILL.md` — the instruction the model receives, with `<<placeholder>>`s for
+closed lists rendered live from the catalog — under the bot it belongs to,
+`rsm_thrive/services/courses/skills/` or `rsm_thrive/services/resources/skills/`.
+`rsm_thrive/services/skills.py` is the shared runner (`read` for JSON readings,
+`say` / `say_json` for prose); `rsm_thrive/services/courses/reading.py` binds it
+to the planner's folder and holds the planner's validators.
+
+| Skill | Called from | Does |
+| --- | --- | --- |
+| `read_turn` | `router.model_route`, after `rule_route` returns None; `router.read_position` for the situational route's follow-up | route + confidence; `act`; `track`, `load`, `completed_codes`, `skills`, `wants_menu`; the curated profile id and the curated industry id the words denote; the position (`previous_track`, `current_quarter`, `finish_on_time`); `menu_pick` positions and `menu_compare`; with a plan on screen, `plan_action` with `courses`, `load`, `quarter`, `route_choice` |
+| `answer_course_facts` | `orchestrator._answer_factual` | writes the factual answer from the rendered catalog rows and passages |
+| `explain_position` | `situation.explain` | writes the trade-offs in a computed ledger |
+| `small_talk` | `replies._small_talk_reply` | two sentences once a plan is on screen |
+| `read_question` (Resources) | `resources.bot.answer_faq`, first, on every question | `in_scope`, `search_terms` + `topic` for retrieval, `needs_context` + `clarifying_question`, a campus-scoped `web_query` |
+| `answer_question` (Resources) | `resources.bot._write` | JSON `answered` + `reply`, citing passages `[n]` and web results `[Wn]`; the reply is labelled by what it cited |
+| `career_advice` (Resources) | `resources.bot.answer_career` | the career bot's advice, passages rendered when retrieved |
+
+Why a skill and not another regex: every word list on this surface was grown
+from a live failure (`git log` reads as a list of them), and a list can only
+hold phrasings already seen. The rules stay first — free, instant,
+deterministic — and the skill reads what they could not.
+
+What keeps it safe:
+
+- **Context.** `orchestrator.turn_context` renders the planner's own state —
+  the question asked last, what is on file, the plan on screen with its codes,
+  the walk-through quarter — above the student's message, labelled as ours.
+  "17" and "heavy" are read against the question they answer.
+- **Validation.** Every field passes a validator in `courses/reading.py`
+  (`track_of`, `load_of`, `courses_of`, `ratings_of`; `one_of` and the other generic ones in `skills.py`) that
+  drops anything outside its closed set. A course named by title resolves
+  only when exactly one catalog row matches. `Route.learned`, `Route.action`
+  and `Route.act` carry only what survived.
+- **Same machinery.** `_stated_by` refuses a question (`act == "ask"` or
+  `planner.is_question`) and the situational route's own turn; what is left
+  goes through `_intake_progress`, exactly as a typed "17 month" does.
+  `_plan_action` calls the same `_review_reply`, `_finalise_reply`,
+  `_handle_change_request` and `_apply_quarter_load` that `_maintenance`
+  does. The goal is never taken from a reading: a role the model read goes
+  through `_answer_role`, which confirms it back first.
+- **One writer, labelled by what it used** (`resources.bot._write`). Passages
+  are numbered `[n]`, web results `[Wn]`; a reply citing only passages lists
+  their documents as sources, one citing only W carries the web notice and the
+  pages read, one citing both shows both. When the best passage is under
+  `web_race_below` the web results are in the prompt from the start, so thin
+  support is one model call. Strong passages that decline get one more call
+  with the web results (a clean slate if the search found nothing).
+- **Ranking after retrieval** (`resources.bot._rerank`). Retrieval decides
+  what is in; this decides the order and the mix: a title or heading sharing a
+  content word with the question is boosted, the programme's own pages
+  (Rady, MSBA, the cohort's Canvas) are boosted on top of that and only
+  then, one document holds at most three of `top_k` slots, and the
+  provenance chunk is dropped. Four queries feed it: the question, the
+  reading's `search_terms`, and its `topic`. Measured 2026-09-20 on "how to
+  register for classes": the cohort's RadyReady page went from unranked to
+  first. `_cited` then lists only the documents the reply cited by number.
+- **One reading for the planner.** The situational route's position (track
+  now, track before, current quarter, finishing on time) is read by
+  `read_turn`; `Route.position` carries it so a classified turn is read once,
+  and `router.read_position` reads the follow-up turn with the same skill.
+- **The plan-is-imminent read.** Once the load question has been asked, any
+  turn delivers the plan with what was assumed said aloud. `_plan_is_imminent`
+  spots that state and runs the skill *before* the build, so "not too heavy
+  please" becomes the load the plan is built on rather than a remark it
+  ignored.
+- **Outage is outage.** `Reading.degraded` becomes the `degraded` route, never
+  a guess and never a content refusal.
+
+`tests/test_reading_skills.py` holds the contract: files load and render with
+no placeholder left; every validator drops what is outside its set; the old
+four-key classifier answers still parse (every existing test scripts them);
+and each action lands through the same code the rules reach.
 
 REST surface (`rsm_thrive/views/planner.py`, all under
 `/api/thrive/plan*`, all `@profile_required`):

@@ -4,7 +4,7 @@ import pytest
 
 from rsm_thrive.models import Document, DocumentChunk
 from rsm_thrive.services.embeddings import FakeEmbeddings
-from rsm_thrive.services.ingest import chunk_text, ingest_document
+from rsm_thrive.services.resources.ingest import chunk_text, ingest_document
 
 pytestmark = pytest.mark.django_db
 

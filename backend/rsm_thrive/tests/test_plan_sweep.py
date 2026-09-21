@@ -27,8 +27,8 @@ import itertools
 
 import pytest
 
-from rsm_thrive.services import planner
-from rsm_thrive.services.electives import load_catalog
+from rsm_thrive.services.courses import planner
+from rsm_thrive.services.courses.electives import load_catalog
 
 TRACKS = ("11 month", "17 month")
 LOADS = ("light", "moderate", "heavy")
@@ -106,7 +106,7 @@ def test_the_plan_is_legal(case):
     # concession is what makes the curated sets schedulable at all. It is
     # tried at zero first, and wherever it is actually taken the plan has to
     # SAY so -- a student who just chose these loads is owed that.
-    from rsm_thrive.services.bundles import QUARTER_FLEX
+    from rsm_thrive.services.courses.bundles import QUARTER_FLEX
 
     slack = QUARTER_FLEX if plan["route"] == "fixed" else 0
     bounds = {q["key"]: q for q in planner.adjustable_quarters(case["track"])}

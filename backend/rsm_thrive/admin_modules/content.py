@@ -24,7 +24,7 @@ from django.shortcuts import redirect
 from django.template.response import TemplateResponse
 from django.urls import path
 
-from rsm_thrive.services import electives
+from rsm_thrive.services.courses import electives
 
 from .access import is_thrive_admin
 
@@ -40,7 +40,7 @@ def _clear_caches():
     """Make a saved catalog edit visible to the bots immediately."""
     electives.forget_catalog()
     try:  # bundles are cached independently in some builds
-        from rsm_thrive.services import bundles
+        from rsm_thrive.services.courses import bundles
         for attr in ("forget_bundles", "load_bundles"):
             fn = getattr(bundles, attr, None)
             if fn is not None and hasattr(fn, "cache_clear"):

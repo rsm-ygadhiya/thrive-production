@@ -11,8 +11,8 @@ import pytest
 from django.contrib.auth.models import User
 
 from rsm_thrive.models import Conversation
-from rsm_thrive.services import orchestrator, planner
-from rsm_thrive.services.electives import load_catalog
+from rsm_thrive.services.courses import orchestrator, planner
+from rsm_thrive.services.courses.electives import load_catalog
 from rsm_thrive.services.llm import FakeLLM
 
 pytestmark = pytest.mark.django_db
@@ -107,26 +107,28 @@ class TestTheCourseGoingOut:
 
     def test_a_course_offered_later_says_where_and_what_it_displaces(self):
         plan = _plan()
-        row = _row(plan, "MGTA 461")            # Fall, Winter and Spring
+        row = _row(plan, "MGTA 457")            # in Fall; also Spring
         note = planner.displaced_note(plan, _by_id()[row["courseId"]], "fall")
-        assert "also runs in Winter and Spring" in note
-        assert "**Winter** (later," in note
+        assert "also runs in Spring" in note
         assert "**Spring** (later," in note
-        assert "in place of **MGTA 458**" in note
-        assert "Say **swap MGTA 458 for MGTA 461**" in note
+        assert "in place of **MGTA 460**" in note
+        assert "Say **swap MGTA 460 for MGTA 457**" in note
 
     def test_an_earlier_quarter_is_called_earlier(self):
-        plan = _plan()
-        row = _row(plan, "CSE 251A")            # in Spring; also Fall and Winter
+        # Product Analyst's plan holds MGTA 457 in Spring; it also runs in Fall.
+        plan = planner.build_for({**ANSWERS, "goals": ["product-analyst"]})
+        row = _row(plan, "MGTA 457")
         note = planner.displaced_note(plan, _by_id()[row["courseId"]], "spring")
         assert "(earlier," in note
         assert "(later," not in note
 
     def test_a_season_the_catalog_only_knows_as_varies_is_hedged(self):
-        plan = _plan()
-        row = _row(plan, "MGTA 461")
-        note = planner.displaced_note(plan, _by_id()[row["courseId"]], "fall")
+        # The CSE courses are the ones the catalog knows only as a pattern.
+        plan = planner.build_for({**ANSWERS, "goals": ["ml-engineer"]})
+        row = _row(plan, "CSE 251B")            # Winter here; Spring as "varies"
+        note = planner.displaced_note(plan, _by_id()[row["courseId"]], "winter")
         assert "exact term varies" in note
+        plan = _plan()
         row = _row(plan, "MGTA 457")            # Fall and Spring, real terms
         note = planner.displaced_note(plan, _by_id()[row["courseId"]], "fall")
         assert "exact term varies" not in note
@@ -163,7 +165,7 @@ class TestTheCourseGoingOut:
                     "walk me through it", "next", "swap MGTA 461 for MGTA 459")
         assert reply.model_note == "review"
         assert reply.body.startswith("Swapped **MGTA 461** for **MGTA 459**.")
-        assert "**MGTA 461** also runs in Winter and Spring" in reply.body
+        assert "**MGTA 461** is only offered in **Fall**" in reply.body
         assert "\n\n---\n\n" in reply.body
 
 
@@ -238,7 +240,7 @@ class TestTheCourseWantedIn:
         reply = ask(conversation, "data scientist, 11 month, moderate",
                     "when is CSE 251B offered?")
         assert reply.model_note == "availability"
-        assert "offered in Fall, Winter and Spring" in reply.body
+        assert "offered in Winter and Spring" in reply.body
         assert "exact term varies" in reply.body
 
     def test_a_course_already_in_the_plan_is_not_claimed(self, conversation):

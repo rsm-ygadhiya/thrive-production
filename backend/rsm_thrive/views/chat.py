@@ -10,9 +10,10 @@ from rsm_thrive.http import (BadRequest, api_login_required, json_error,
                              json_ok, parse_body)
 from rsm_thrive.models import ChatMessage, ChatTurnLog, Conversation
 from rsm_thrive.serializers.chat import conversation_payload
-from rsm_thrive.services.bots import BotReply, answer_career, answer_faq
-from rsm_thrive.services.orchestrator import answer as answer_courses
-from rsm_thrive.services import planner
+from rsm_thrive.services.reply import BotReply
+from rsm_thrive.services.resources.bot import answer_career, answer_faq
+from rsm_thrive.services.courses.orchestrator import answer as answer_courses
+from rsm_thrive.services.courses import planner
 from rsm_thrive.services.llm import get_llm
 
 logger = logging.getLogger("rsm_thrive.chat")

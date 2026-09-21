@@ -76,7 +76,6 @@
     "differentiator": [
       "MGTA 463",
       "MGTA 458",
-      "CSE 254",
       "MGTA 457"
     ],
     "universal": [
@@ -84,10 +83,14 @@
       "MGTA 460"
     ],
     "anchor_units": 12,
-    "non_msba_units": 8,
+    "non_msba_units": 4,
     "differentiator_added_by_us": [
       "MGTA 457"
-    ]
+    ],
+    "removed_by_us": [
+      "CSE 254"
+    ],
+    "removed_by_us_note": "CSE 254 is not on Rady's pre-approved elective list and has not run since Winter 2023."
   },
   "analytics-engineer": {
     "profile": "Analytics Engineer",

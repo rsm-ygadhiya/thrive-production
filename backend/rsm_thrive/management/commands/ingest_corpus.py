@@ -5,7 +5,7 @@ from pathlib import Path
 from django.core.management.base import BaseCommand, CommandError
 
 from rsm_thrive.services.embeddings import get_embeddings
-from rsm_thrive.services.ingest import extract_pdf_text, ingest_document
+from rsm_thrive.services.resources.ingest import extract_pdf_text, ingest_document
 
 CATALOG = Path(__file__).resolve().parents[2] / "data" / "catalog" / "courses.json"
 

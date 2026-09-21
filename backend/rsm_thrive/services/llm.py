@@ -106,6 +106,21 @@ class LLM(ABC):
     def chat(self, system: str, messages: list, json_mode: bool = False) -> str:
         """messages: [{"role": "user"|"assistant", "content": str}, ...] -> reply text."""
 
+    def reader(self) -> "LLM":
+        """The model the READING skills run on. Default: this one.
+
+        A reading is a small JSON extraction -- which route, which track,
+        how a campus page would word a question -- and a fast model does it
+        as well as a large one. Measured 2026-09-20 on the TritonAI gateway:
+        `read_question` took 5.5-7.5s on claude-sonnet-5 and 3.6-4.2s on
+        gemini-3.5-flash with the same fields filled the same way -- but the
+        planner's `read_turn` on the same model mapped an uncovered job onto
+        a curated profile, so each skill opts in (`skills.read(fast=True)`).
+        Only `TritonAiLLM` overrides this, and only when
+        `TRITONAI_READER_MODEL` is set; answers always stay on the main model.
+        """
+        return self
+
     def search_chat(self, system: str, messages: list, json_mode: bool = False,
                     sources_out: list = None, search_query: str = None) -> str:
         """Like `chat`, but grounded in pages fetched now rather than in memory.
@@ -203,7 +218,38 @@ def parse_llm_json(text: str) -> dict:
             return obj
     if found:
         return found[0]
+    salvaged = salvage_json_reply(text)
+    if salvaged is not None:
+        return salvaged
     return {"reply": text, "action": "chat"}
+
+
+_ANSWERED = re.compile(r'"answered"\s*:\s*(true|false)', re.I)
+_REPLY_TAIL = re.compile(r'"reply"\s*:\s*"(.*)"\s*}\s*$', re.S)
+
+
+def salvage_json_reply(text):
+    """A {"answered": ..., "reply": "..."} object whose reply carries unescaped
+    quotes, read anyway; or None.
+
+    Measured live: the writer answered about orientation and quoted the
+    "Meet Your MSBA Team" page inside its reply, which broke the JSON; the
+    parser fell back to treating the whole thing as prose, and the student
+    saw raw braces. The shape is fixed and the reply is the last value, so
+    the text between `"reply": "` and the closing `"}` IS the reply, quotes
+    and all.
+    """
+    text = str(text or "").strip()
+    if not text.startswith("{") or '"reply"' not in text:
+        return None
+    match = _REPLY_TAIL.search(text)
+    if not match:
+        return None
+    out = {"reply": match.group(1).replace('\\"', '"').replace("\\n", "\n").strip()}
+    answered = _ANSWERED.search(text)
+    if answered:
+        out["answered"] = answered.group(1).lower() == "true"
+    return out
 
 
 class TritonAiLLM(LLM):
@@ -219,6 +265,7 @@ class TritonAiLLM(LLM):
         if not key:
             raise RuntimeError("TRITONAI_API_KEY is not set.")
         self._model = model or getattr(settings, "TRITONAI_MODEL", "claude-sonnet-5")
+        self._reader = None
         # A per-call ceiling, so one unresponsive socket cannot own the turn.
         # The SDK's own default is ten minutes, which is not a timeout for a
         # student waiting on a chat reply.
@@ -229,6 +276,14 @@ class TritonAiLLM(LLM):
 
     def _create(self, **kwargs):
         return self._client.chat.completions.create(**kwargs)
+
+    def reader(self):
+        wanted = getattr(settings, "TRITONAI_READER_MODEL", "") or self._model
+        if wanted == self._model:
+            return self
+        if self._reader is None:
+            self._reader = TritonAiLLM(model=wanted, sleep=self._sleep)
+        return self._reader
 
     def _status_of(self, exc):
         return getattr(exc, "status_code", None)

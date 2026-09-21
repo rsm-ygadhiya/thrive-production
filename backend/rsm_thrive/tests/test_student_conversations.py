@@ -15,7 +15,7 @@ import pytest
 from django.contrib.auth.models import User
 
 from rsm_thrive.models import Conversation
-from rsm_thrive.services import electives, orchestrator, planner, router
+from rsm_thrive.services.courses import electives, orchestrator, planner, router
 from rsm_thrive.services.llm import FakeLLM
 
 pytestmark = pytest.mark.django_db
@@ -292,7 +292,7 @@ class TestThirdRound:
 class TestTheNudgeAsksOnlyForWhatIsMissing:
 
     def _nudge_for(self, conversation, answers):
-        from rsm_thrive.services.bots import BotReply
+        from rsm_thrive.services.reply import BotReply
         reply = orchestrator._with_a_way_back(
             conversation, answers,
             BotReply("An answer.", [], "catalog-rag", route=router.FACTUAL))

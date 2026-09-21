@@ -16,7 +16,7 @@ import pytest
 from django.contrib.auth.models import User
 
 from rsm_thrive.models import Conversation
-from rsm_thrive.services import orchestrator, planner, router
+from rsm_thrive.services.courses import orchestrator, planner, router
 from rsm_thrive.services.llm import FakeLLM
 
 pytestmark = pytest.mark.django_db
@@ -284,19 +284,20 @@ class TestTheBundleAndTheLoadSpreadCoexist:
     def test_an_exact_fit_is_preferred_where_one_exists(self):
         """The flex is a concession, not a preference, and it was being taken
         even where an exact fit was available. Trying zero first recovers
-        exactly the bundles `bundles.QUARTER_FLEX` documents as fitting without
-        it — 5 of 14 on the 11-month track, 1 of 14 on the 17-month — so most
-        genuinely need the give, and the ones that do not no longer take it."""
+        every bundle that fits without it. Measured with each course's real
+        terms in the catalog (and free slots for what the set cannot reach):
+        9 of 14 on the 11-month track and 6 of 14 on the 17-month place
+        exactly; the rest genuinely need the give."""
         exact = {track: sum(
             1 for role_id in planner.load_careers()
             if not planner.build_for({"track": track, "goals": [role_id],
                                       **self.SKILLS}, frozenset())["quarterFlex"])
             for track in ("11 month", "17 month")}
-        assert exact["11 month"] == 5, exact
-        assert exact["17 month"] == 1, exact
+        assert exact["11 month"] == 9, exact
+        assert exact["17 month"] == 6, exact
 
     def test_the_flex_never_exceeds_its_own_bound(self):
-        from rsm_thrive.services.bundles import QUARTER_FLEX
+        from rsm_thrive.services.courses.bundles import QUARTER_FLEX
 
         for track in ("11 month", "17 month"):
             for role_id in planner.load_careers():
@@ -352,7 +353,7 @@ class TestTheBundleAndTheLoadSpreadCoexist:
         plan = planner.build_for(
             {"track": "11 month", "goals": ["data-scientist"], "route": "custom",
              **self.SKILLS}, frozenset())
-        from rsm_thrive.services.bots import _divergence_note
+        from rsm_thrive.services.courses.replies import _divergence_note
 
         assert _divergence_note({"route": "custom", "goals": ["data-scientist"]},
                                 plan) == ""
@@ -426,7 +427,7 @@ class TestEditingTheCatalogTakesEffect:
     """
 
     def test_the_version_changes_when_a_file_does(self, tmp_path):
-        from rsm_thrive.services import electives
+        from rsm_thrive.services.courses import electives
 
         before = electives._stat_version()
         path = electives._DATA / "careers.json"
@@ -441,7 +442,7 @@ class TestEditingTheCatalogTakesEffect:
     def test_a_change_is_picked_up_without_a_restart(self):
         import json
 
-        from rsm_thrive.services import electives, router
+        from rsm_thrive.services.courses import electives, router
 
         path = electives._DATA / "careers.json"
         original = path.read_text()
@@ -459,8 +460,8 @@ class TestEditingTheCatalogTakesEffect:
     def test_every_derived_lookup_follows_the_files(self):
         """The wrappers, not just `load_catalog`. A derived cache keyed on
         nothing goes stale exactly as badly as the one it derives from."""
-        from rsm_thrive.services import bundles, electives, planner, router
-        from rsm_thrive.services import skill_match
+        from rsm_thrive.services.courses import bundles, electives, planner, router
+        from rsm_thrive.services.courses import skill_match
 
         version = electives.catalog_version()
         for cached in (electives._load_catalog, electives._load_careers,
@@ -479,7 +480,7 @@ class TestEditingTheCatalogTakesEffect:
         """`bundles._by_id` sits inside the placement search, so "once per
         catalog lookup" is tens of thousands of times per plan. Unmemoised
         this took the suite from 8.7s to 15.1s."""
-        from rsm_thrive.services import electives
+        from rsm_thrive.services.courses import electives
 
         electives.forget_catalog()
         first = electives.catalog_version()

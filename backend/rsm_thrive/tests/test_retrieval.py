@@ -2,7 +2,7 @@ import pytest
 
 from rsm_thrive.models import Document, DocumentChunk
 from rsm_thrive.services.embeddings import FakeEmbeddings, cosine, get_embeddings
-from rsm_thrive.services.retrieval import retrieve
+from rsm_thrive.services.resources.retrieval import retrieve
 
 pytestmark = pytest.mark.django_db
 
@@ -145,7 +145,7 @@ class TestRetrieve:
         """A word that IS in the corpus stays itself, even if another corpus
         word is one edit away — otherwise a real term gets "corrected" into a
         different real term and the answer silently changes topic."""
-        from rsm_thrive.services.retrieval import expand_terms
+        from rsm_thrive.services.resources.retrieval import expand_terms
 
         vocabulary = frozenset({"calender", "calendar"})
         [group] = expand_terms(["calender"], vocabulary)
@@ -154,13 +154,13 @@ class TestRetrieve:
     def test_short_words_are_matched_exactly(self):
         """Under 5 characters an edit turns one real word into another — "fees"
         is one edit from "feed" — so the rule would do more harm than good."""
-        from rsm_thrive.services.retrieval import expand_terms
+        from rsm_thrive.services.resources.retrieval import expand_terms
 
         [group] = expand_terms(["fees"], frozenset({"feed", "fees"}))
         assert group == frozenset({"fees"})
 
     def test_typo_expansion_only_offers_words_the_corpus_actually_has(self):
-        from rsm_thrive.services.retrieval import expand_terms
+        from rsm_thrive.services.resources.retrieval import expand_terms
 
         [group] = expand_terms(["zooom"], frozenset({"zoom", "unrelated"}))
         assert group == frozenset({"zooom", "zoom"})
@@ -208,7 +208,7 @@ class TestRetrieve:
                         lexical_min=1.0) != []
 
     def test_keyword_score_accepts_grouped_spellings(self):
-        from rsm_thrive.services.retrieval import keyword_score
+        from rsm_thrive.services.resources.retrieval import keyword_score
 
         chunk = _doc("t#kw", "T", "policy", ["resources"], [
             ("H", "activate your zoom account"),
@@ -232,7 +232,7 @@ class TestTheCorpusCache:
     582 ms down to 9 ms. The snapshot must never be the wrong corpus."""
 
     def test_a_changed_corpus_is_seen_on_the_next_query(self):
-        from rsm_thrive.services import retrieval
+        from rsm_thrive.services.resources import retrieval
         _doc("a#1", "Pantry", "policy", ["resources"], [
             ("Pantry", "The Hub pantry shares a recipe box with students."),
         ])

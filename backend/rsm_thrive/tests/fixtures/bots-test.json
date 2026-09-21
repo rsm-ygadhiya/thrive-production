@@ -1,6 +1,7 @@
 {
   "faq": {
-    "min_similarity": 0.35
+    "min_similarity": 0.35,
+    "web_race_below": 0.0
   },
   "career": {
     "min_similarity": 0.35

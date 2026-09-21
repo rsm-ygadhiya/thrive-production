@@ -27,7 +27,7 @@ import pytest
 from django.contrib.auth.models import User
 
 from rsm_thrive.models import Conversation
-from rsm_thrive.services import orchestrator, planner, router
+from rsm_thrive.services.courses import orchestrator, planner, router
 from rsm_thrive.services.llm import FakeLLM
 
 pytestmark = pytest.mark.django_db
@@ -72,9 +72,10 @@ def check_invariants(conversation, reply, history):
     assert reply.body.strip(), f"empty reply after {where}"
     assert DEGRADED not in reply.body, f"degraded after {where}"
     # The industry routes answer WITH buttons -- six industries, then ten job
-    # titles -- and nothing else on this surface does. A stray button anywhere
+    # titles, and the "which of those did you mean" that re-offers the same
+    # list -- and nothing else on this surface does. A stray button anywhere
     # else is still the bug this was written to catch.
-    if reply.model_note in ("industry-menu", "industry-roles"):
+    if reply.model_note in ("industry-menu", "industry-roles", "menu-which"):
         assert reply.quick_replies, f"empty menu after {where}"
     else:
         assert reply.quick_replies == [], f"buttons after {where}"

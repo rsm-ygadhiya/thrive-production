@@ -15,7 +15,7 @@ from pathlib import Path
 
 from rsm_thrive.models import Enrollment
 
-_DATA = Path(__file__).resolve().parent.parent / "data" / "catalog"
+_DATA = Path(__file__).resolve().parents[2] / "data" / "catalog"
 
 # The three files that ARE the catalog. Everything derived from them keys its
 # cache on `catalog_version()`.

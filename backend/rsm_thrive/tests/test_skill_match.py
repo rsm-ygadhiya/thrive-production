@@ -7,8 +7,8 @@ properties the old ones did not have.
 
 import pytest
 
-from rsm_thrive.services import skill_match
-from rsm_thrive.services.electives import load_catalog
+from rsm_thrive.services.courses import skill_match
+from rsm_thrive.services.courses.electives import load_catalog
 
 
 def course(code, **fields):

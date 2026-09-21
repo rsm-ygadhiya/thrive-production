@@ -27,9 +27,9 @@ from django.core.management.base import BaseCommand, CommandError
 
 from rsm_thrive.models import DocumentChunk
 from rsm_thrive.services.bot_config import bot_config
-from rsm_thrive.services.bots import answer_career, answer_faq
+from rsm_thrive.services.resources.bot import answer_career, answer_faq
 from rsm_thrive.services.llm import FakeLLM, get_llm
-from rsm_thrive.services.retrieval import retrieve
+from rsm_thrive.services.resources.retrieval import retrieve
 
 EVALS = Path(__file__).resolve().parents[2] / "data" / "evals"
 GOLDEN = EVALS / "faq_golden.json"
@@ -39,6 +39,11 @@ NEEDS_EXPECTATION = "needs_expectation"
 # several model calls per turn, so it cannot be driven by a scripted FakeLLM;
 # it is skipped unless a real backend is asked for.
 RUNNABLE = {"resources", "career"}
+
+# What `read_question` says when it has nothing to add, and when it judges a
+# question outside the bot's remit.
+READ_OUT_OF_SCOPE = '{"in_scope": false, "search_terms": [], "web_query": ""}'
+READ_NOTHING_MORE = ('{"in_scope": true, "topic": "", "search_terms": [], "needs_context": false, "clarifying_question": "", "web_query": ""}')
 
 
 class Command(BaseCommand):
@@ -128,7 +133,17 @@ class Command(BaseCommand):
         if options["llm"] == "fake":
             hits = retrieve(case["question"], destination,
                             config["top_k"], config["min_similarity"])
-            llm = FakeLLM(replies=[" ".join(c.text for c, _ in hits) or "?"])
+            answer = " ".join(c.text for c, _ in hits) or "?"
+            # The resources bot READS the question before it answers (see
+            # `resources.bot.answer_faq`), so its scripted model gets a
+            # reading that adds nothing, then the answer.
+            # A scripted reader cannot judge scope, so the fake stands in
+            # for it the way the old flat refusal did: no corpus hit, out of
+            # scope. That keeps the golden set's refusal cases meaningful
+            # under `--llm fake`; `--llm real` reads for itself.
+            reading = READ_NOTHING_MORE if hits else READ_OUT_OF_SCOPE
+            llm = FakeLLM(replies=([reading, answer] if bot != "career"
+                                   else [answer]))
         else:
             llm = get_llm()
         if bot == "career":

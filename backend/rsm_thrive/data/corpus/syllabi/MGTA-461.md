@@ -11,13 +11,13 @@ technical_level: 5
 workload: "heavy"
 workload_basis: "Programming-assignment and project driven CSE-style course."
 grading: "See department syllabus."
-offerings: [{"term": "FA26", "season": "FA", "instructor": "McAuley, Julian"}, {"term": "varies", "season": "FA", "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."}, {"term": "varies", "season": "WI", "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."}, {"term": "varies", "season": "SP", "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."}]
+offerings: [{"term": "FA26", "season": "FA", "instructor": "McAuley, Julian"}]
 prerequisites: "Comfortable programming and machine learning fundamentals."
 topics: ["recommender systems", "web mining", "collaborative filtering", "predictive analytics", "real-world datasets"]
 skills: ["building recommender systems", "large-scale data mining", "applied machine learning engineering"]
 tools: ["Python"]
 career_tags: ["machine-learning", "data-engineering", "product"]
-notes: "Cross-listed with CSE 258 — counts as an MGTA elective (not against the 16-unit non-MGTA cap). Taught in the CSE department style: expect substantial coding."
+notes: "Cross-listed with CSE 258 — counts as an MGTA elective (not against the 16-unit non-MGTA cap). CSE 258 has run every Fall since 2017 (Winter sections occasionally); the MSBA section is scheduled for Fall 2026. Taught in the CSE department style: expect substantial coding."
 also_known_as: ["CSE 258"]
 also_known_as_note: "cross-listed with CSE 258"
 syllabi: []

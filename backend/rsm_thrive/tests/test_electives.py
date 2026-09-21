@@ -2,7 +2,7 @@ import pytest
 from django.contrib.auth.models import User
 
 from rsm_thrive.models import Enrollment
-from rsm_thrive.services.electives import (
+from rsm_thrive.services.courses.electives import (
     load_careers, load_catalog, rank_electives, recommend_for)
 from rsm_thrive.testing import make_course
 

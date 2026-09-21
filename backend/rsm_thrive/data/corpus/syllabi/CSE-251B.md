@@ -11,13 +11,13 @@ technical_level: 5
 workload: "heavy"
 workload_basis: "Graduate CSE programming projects; mathematically demanding."
 grading: "See department syllabus."
-offerings: [{"term": "varies", "season": "FA", "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."}, {"term": "varies", "season": "WI", "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."}, {"term": "varies", "season": "SP", "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."}]
+offerings: [{"term": "varies", "season": "WI", "format_notes": "Offered most Winters (and some Springs); confirm on the CSE tentative offerings page."}, {"term": "varies", "season": "SP", "format_notes": "Offered some Springs; confirm on the CSE tentative offerings page."}]
 prerequisites: "CSE 251A (or equivalent ML background)."
 topics: ["multi-layer perceptrons", "backpropagation", "CNNs", "RNNs", "transformers", "automatic differentiation"]
 skills: ["building and training deep neural networks", "modern architectures (CNNs, transformers)"]
 tools: ["Python", "PyTorch"]
 career_tags: ["machine-learning", "ai-genai"]
-notes: "Successor to the old 'Neural Networks for Pattern Recognition' (CSE 253) on Rady's pre-approved list. CSE majors have priority; enroll as space permits."
+notes: "Successor to the old 'Neural Networks for Pattern Recognition' (CSE 253) on Rady's pre-approved list. Runs in Winter, sometimes Spring — never Fall in recent years. Check the CSE department's tentative graduate course offerings page before you plan around it — CSE majors have priority and seats go as space permits."
 also_known_as: ["CSE 253"]
 also_known_as_note: "successor to CSE 253 on Rady's pre-approved list"
 syllabi: []

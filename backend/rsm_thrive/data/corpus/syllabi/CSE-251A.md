@@ -11,13 +11,13 @@ technical_level: 5
 workload: "heavy"
 workload_basis: "Graduate CSE problem sets and exams; mathematically demanding."
 grading: "See department syllabus."
-offerings: [{"term": "varies", "season": "FA", "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."}, {"term": "varies", "season": "WI", "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."}, {"term": "varies", "season": "SP", "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."}]
+offerings: [{"term": "varies", "season": "FA", "format_notes": "Historically a Fall course; it is not on the Fall 2026 CSE graduate list, so confirm on the CSE tentative offerings page."}]
 prerequisites: "Graduate standing; strong math (linear algebra, probability) strongly advised."
 topics: ["supervised learning", "logistic regression", "kernel methods", "decision trees", "ensemble methods", "neural networks", "optimization"]
 skills: ["rigorous ML theory and implementation", "deriving and implementing learning algorithms"]
 tools: ["Python"]
 career_tags: ["machine-learning", "data-engineering"]
-notes: "Pre-approved MSBA elective (listed by Rady as CSE 250B, renumbered to 251A). CSE majors have priority; enroll as space permits."
+notes: "Pre-approved MSBA elective (listed by Rady as CSE 250B, renumbered to 251A). Historically offered in Fall only, and not listed for Fall 2026. Check the CSE department's tentative graduate course offerings page before you plan around it — CSE majors have priority and seats go as space permits."
 also_known_as: ["CSE 250B"]
 also_known_as_note: "renumbered; Rady's electives page still lists it as CSE 250B"
 syllabi: []

@@ -349,11 +349,16 @@ class TestFailuresAreLogged:
 class TestBotConfig:
     def test_defaults_load_and_have_required_keys(self):
         config = load_bot_config()
+        assert set(config) >= {"faq", "electives", "career"}
         for bot in ("faq", "electives", "career"):
             entry = bot_config(bot)
-            assert isinstance(entry["system_prompt"], str) and entry["system_prompt"]
             assert isinstance(entry["top_k"], int)
             assert 0.0 <= entry["min_similarity"] <= 1.0
+        # Retrieval gates only, for every bot. The prompts are skill files
+        # beside the bot that owns them (`services/*/skills/*/SKILL.md`),
+        # deliberately out of reach of a runtime overlay.
+        for bot in ("faq", "career", "electives"):
+            assert "system_prompt" not in bot_config(bot)
         assert "refusal_reply" in bot_config("faq")
 
     def test_override_path(self, tmp_path, settings):
@@ -363,4 +368,4 @@ class TestBotConfig:
         settings.THRIVE_BOT_CONFIG = str(path)
         assert bot_config("faq")["top_k"] == 99
         # unspecified keys fall through to the repo defaults
-        assert bot_config("faq")["system_prompt"]
+        assert bot_config("faq")["refusal_reply"]

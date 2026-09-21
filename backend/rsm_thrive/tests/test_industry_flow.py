@@ -25,7 +25,7 @@ import pytest
 from django.contrib.auth.models import User
 
 from rsm_thrive.models import Conversation
-from rsm_thrive.services import electives, orchestrator, planner, router
+from rsm_thrive.services.courses import electives, orchestrator, planner, router
 from rsm_thrive.services.llm import FakeLLM
 
 pytestmark = pytest.mark.django_db

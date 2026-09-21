@@ -1,204 +1,19 @@
-"""The FAQ and career bots, and the pieces a plan of study is maintained with.
+"""The pieces a plan of study is maintained with, once one exists.
 
-The courses surface no longer has a bot function here. It is dispatched by
-`services/orchestrator.py`, which routes a question and then calls the
-helpers below for the operations a student performs on a plan they already
-have -- swapping a course, walking it a quarter at a time, finalising it.
+Swapping a course, walking the plan a quarter at a time, finalising it,
+explaining why a course is there, and the two-sentence answer to anything
+else once a plan is on screen. `orchestrator` dispatches to these after the
+router has had its say; none of them is a route.
 
 What went with the interview: `_extract_intake`, `_aside` and
 `_retitle_if_button_pressed` existed only because the courses bot opened
 with four scripted questions and had to cope with a student asking something
-else during them. There is no script to interrupt now, so the aside is just
-the factual route and the retitle is unnecessary -- a conversation opened by
-typing a real sentence already has a better title than any of them composed.
+else during them. There is no script to interrupt now.
 """
 
-from dataclasses import dataclass, field
-
-from rsm_thrive.services import planner
-from rsm_thrive.services.bot_config import bot_config
-from rsm_thrive.services.electives import load_catalog
-from rsm_thrive.services.llm import parse_llm_json
-from rsm_thrive.services.retrieval import retrieve
-
-
-@dataclass
-class BotReply:
-    body: str
-    chunk_ids: list = field(default_factory=list)
-    model_note: str = "llm"
-    # Choices to offer as buttons alongside this reply. Empty for a free-text
-    # answer; a question with a fixed set of answers should not require typing.
-    quick_replies: list = field(default_factory=list)
-    # A small form to offer instead, when one control per item beats a row of
-    # buttons. None for every other reply. See `planner.rating_form_for`.
-    form: dict | None = None
-    # Which route the orchestrator took to produce this, and how sure it was.
-    # `route_confidence` stays None when a rule decided, because a rule has no
-    # confidence to report and recording 1.0 would make the two look alike in
-    # the report that exists to tell them apart. See `services/router.py`.
-    route: str = ""
-    route_confidence: float | None = None
-    # This turn declined to answer. Set at every site that declines, rather
-    # than inferred downstream from `model_note`, because the refusal report is
-    # a content backlog and a backlog assembled by parsing prose loses rows
-    # silently the first time the prose changes.
-    refused: bool = False
-    # What this reply SAYS, when the rest of its body is a re-render a caller
-    # may replace with its own. Set by a swap: the body is "Swapped X for Y"
-    # plus a note on where X can still go plus the whole plan, and the
-    # walk-through wants the first two over its own quarter, not the third.
-    lead: str = ""
-    # The plan this reply renders, for a caller that needs to inspect what was
-    # actually scheduled rather than re-derive it. Set only by `_plan_reply`;
-    # None everywhere else. See `orchestrator._uncurated_coverage_note`, which
-    # measures coverage against the courses that survived the unit limits, and
-    # would otherwise have to rebuild the plan to find out what they were.
-    plan: dict | None = None
-
-
-def build_context(hits):
-    lines = []
-    for n, (chunk, _score) in enumerate(hits, start=1):
-        title = chunk.document.title
-        head = f"[{n}] {title} — {chunk.heading}" if chunk.heading else f"[{n}] {title}"
-        lines.append(f"{head}\n{chunk.text}")
-    return "\n\n".join(lines)
-
-
-def append_sources(body, hits):
-    """Append the sources behind an answer, as links where a URL is known.
-
-    A student who is about to act on a deadline should be able to open the page
-    that states it — "Sources: Registration Fees" is a claim, a link is
-    checkable. Documents ingested without a `source_url` (fixtures, pasted
-    material) still list by title alone.
-
-    One source stays inline; several become a bulleted list. A comma-joined run
-    was fine at three sources and unreadable at ten — a single line holding
-    "Where to Find MSBA Plans of Study, Course Schedules and Syllabi, Analytical
-    Writing Program — awp.ucsd.edu, How to Enroll in Individual Classes at
-    UCSD (Community College and CSU Students) — students.ucsd.edu, ..." cannot
-    be scanned, and worse, the titles themselves contain commas, so the reader
-    cannot tell where one source ends and the next begins. `top_k` for the FAQ
-    bot is 10, so ten is the normal case, not the pathological one.
-
-    The list is Markdown the frontend already renders: `RichMessage` turns `- `
-    lines into a real `<ul>` and parses links inside list items, so this arrives
-    as clickable bullets rather than as literal hyphens.
-    """
-    if not hits:
-        return body
-    seen, entries = set(), []
-    for chunk, _score in hits:
-        document = chunk.document
-        if document.title in seen:
-            continue
-        seen.add(document.title)
-        url = (document.source_url or "").strip()
-        entries.append(f"[{document.title}]({url})" if url else document.title)
-    if len(entries) == 1:
-        return f"{body}\n\nSource: {entries[0]}"
-    listed = "\n".join(f"- {entry}" for entry in entries)
-    return f"{body}\n\nSources:\n{listed}"
-
-
-def _trimmed(history, config):
-    return history[-config["max_history_turns"]:]
-
-
-def answer_faq(llm, question, history):
-    config = bot_config("faq")
-    hits = retrieve(question, "resources", config["top_k"],
-                    config["min_similarity"], config.get("lexical_min"),
-                    config.get("lexical_floor", 0.0))
-    if not hits:
-        return _answer_from_the_web(llm, config, question, history)
-    system = f"{config['system_prompt']}\n\nContext passages:\n\n{build_context(hits)}"
-    messages = _trimmed(history, config) + [{"role": "user", "content": question}]
-    body = llm.chat(system, messages)
-    return BotReply(append_sources(body, hits),
-                    [chunk.pk for chunk, _ in hits], "llm")
-
-
-WEB_FALLBACK_SYSTEM = (
-    "You are THRIVE, the assistant for UC San Diego Rady's MSBA program. Rady's "
-    "own material does not cover this question, so you may search the web for "
-    "it.\n\n"
-    "Return ONLY a JSON object: {\"answerable\": true|false, \"reply\": \"...\"}.\n\n"
-    "Set answerable to FALSE, with reply empty, when the question is not "
-    "something a student would ask about their studies, this campus, or their "
-    "career -- general trivia, sport, weather, entertainment -- or when it asks "
-    "you to do their academic work for them.\n\n"
-    "Otherwise set answerable to TRUE and put the answer in reply, following "
-    "these rules:\n"
-    "- NEVER state Rady or MSBA policy as settled fact. Deadlines, fees, unit "
-    "counts, prerequisites and approval chains come from advising, not from the "
-    "web. Where the question turns on one, say what you found, say it is "
-    "unofficial, and send them to MSBA advising to confirm.\n"
-    "- Be concise and concrete, and say what kind of source you drew on.\n"
-    "- Do not claim to be quoting Rady or UCSD material.")
-
-WEB_DISCLAIMER = (
-    "_Rady's own material doesn't cover this, so the above comes from a web "
-    "search rather than program documentation. Please verify anything you act "
-    "on — and for anything about policy, deadlines, fees or approvals, confirm "
-    "with MSBA advising (bookable from the **Appointments** tab)._")
-
-
-def _answer_from_the_web(llm, config, question, history):
-    """No corpus hit: search the web and label the answer as unofficial.
-
-    The spec's rule was a flat refusal here, on the grounds that "a confident
-    wrong policy answer is worse than none". That reasoning is about POLICY, and
-    it is kept -- the prompt refuses to state a deadline, fee or approval chain
-    as settled, and routes those to advising either way. What it was also doing
-    was refusing questions the corpus simply has not got to yet: "What is
-    VMock?" is a real Rady careers tool whose page is band C in the scorecard
-    and therefore not ingested, and a student asking about it got sent to
-    advising for something a web search answers in a sentence.
-
-    Two things this must never do. It must not cite: `chunk_ids` stays empty and
-    no Source line is appended, because attributing a web answer to Rady
-    material is the exact defect that made "2 plus 2 is 4" arrive with a course
-    citation attached. And it must not turn the bot into a general chatbot --
-    the model classifies the question first, and the golden set's weather, sport
-    and write-my-essay cases still refuse.
-
-    Anything unexpected -- a failed call, unparseable output, an empty answer --
-    falls back to the refusal. Failing closed keeps the old guarantee intact
-    for every case this path cannot confidently improve on.
-    """
-    if not config.get("web_fallback", True):
-        return BotReply(config["refusal_reply"], [], "refusal", refused=True)
-    messages = _trimmed(history, config) + [{"role": "user", "content": question}]
-    try:
-        raw = llm.search_chat(WEB_FALLBACK_SYSTEM, messages, True)
-    except Exception:
-        return BotReply(config["refusal_reply"], [], "refusal", refused=True)
-    parsed = parse_llm_json(raw or "")
-    body = str(parsed.get("reply") or "").strip()
-    # `parse_llm_json` degrades unparseable output to {"reply": <raw text>}, so
-    # a missing verdict means the classification never happened. Refuse rather
-    # than pass prose through as though it had been judged in scope.
-    if not parsed.get("answerable") or not body:
-        return BotReply(config["refusal_reply"], [], "refusal", refused=True)
-    return BotReply(f"{body}\n\n{WEB_DISCLAIMER}", [], "web")
-
-
-def answer_career(llm, question, history):
-    # OURS, deliberately. The bots port took only the FAQ bot and the course
-    # recommender; the career bot stays on our own retrieval call, without the
-    # lexical tier its config does not configure.
-    config = bot_config("career")
-    hits = retrieve(question, "career", config["top_k"], config["min_similarity"])
-    system = config["system_prompt"]
-    if hits:
-        system = f"{system}\n\nContext passages:\n\n{build_context(hits)}"
-    messages = _trimmed(history, config) + [{"role": "user", "content": question}]
-    body = llm.chat(system, messages)
-    return BotReply(append_sources(body, hits),
-                    [chunk.pk for chunk, _ in hits], "llm")
+from rsm_thrive.services.courses import planner, reading
+from rsm_thrive.services.courses.electives import load_catalog
+from rsm_thrive.services.reply import BotReply
 
 
 def _catalog_entry(course):
@@ -233,7 +48,7 @@ def _catalog_context(question):
     it found a fee page and replied, which is the FAQ bot's job on a different
     tab.
     """
-    from rsm_thrive.services import electives
+    from rsm_thrive.services.courses import electives
 
     courses = electives.search_catalog(question)
     if courses:
@@ -279,7 +94,7 @@ def _divergence_note(answers, plan):
     the recommendation, so swapping an anchor course out is exactly the moment
     to say so -- once, plainly, without refusing the swap.
     """
-    from rsm_thrive.services import bundles
+    from rsm_thrive.services.courses import bundles
 
     # The plan's OWN account of which fill it got, not the intake's request.
     # A bundle that turned out to be unschedulable falls back to the ranked
@@ -487,18 +302,8 @@ def _explain_course(user, answers, question):
     return None
 
 
-SMALL_TALK_SYSTEM = (
-    "You are THRIVE, a Rady MSBA course planner. The student already has a "
-    "finished plan of study and has just said something that is not a request "
-    "to change it. Reply in AT MOST two sentences. Be warm and brief. Do NOT "
-    "restate the plan or list any courses. If they asked something that is not "
-    "about their courses or this programme at all, say plainly that it is "
-    "outside what you do -- you recommend electives and build plans of study -- "
-    "and do not send them to MSBA advising for it, because advising cannot "
-    "answer it either. If it is about the programme but not about the plan, "
-    "point them at Ask THRIVE's Resources tab or MSBA advising via the "
-    "Appointments tab. If it helps, remind them they can ask to swap a course, "
-    "walk through the plan a quarter at a time, or see it again.")
+# The two-sentence prompt lives in `skills/small_talk/SKILL.md`.
+SMALL_TALK = "small_talk"
 
 
 def _small_talk_reply(llm, user, answers, question, asking):
@@ -507,11 +312,7 @@ def _small_talk_reply(llm, user, answers, question, asking):
     The fallthrough used to be `_plan_reply`, so every unrecognised message --
     including "ok" and "thanks!" -- reprinted the entire plan of study.
     """
-    try:
-        body = (llm.chat(SMALL_TALK_SYSTEM,
-                         [{"role": "user", "content": question}]) or "").strip()
-    except Exception:
-        body = ""
+    body = reading.say(SMALL_TALK, llm, [{"role": "user", "content": question}])
     if not body:
         body = ("Your plan is set. You can ask me to swap a course, walk "
                 "through it a quarter at a time, or show it again.")

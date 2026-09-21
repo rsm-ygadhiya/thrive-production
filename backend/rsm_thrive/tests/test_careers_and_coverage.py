@@ -9,7 +9,7 @@ set they were never shown.
 
 import pytest
 
-from rsm_thrive.services import electives, orchestrator, router
+from rsm_thrive.services.courses import electives, orchestrator, router
 from rsm_thrive.services.llm import FakeLLM
 
 

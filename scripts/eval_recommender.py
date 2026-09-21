@@ -30,8 +30,8 @@ import django
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 django.setup()
 
-from rsm_thrive.services import (bundles, electives, orchestrator,  # noqa: E402
-                                 planner, router)
+from rsm_thrive.services.courses import (bundles, electives,  # noqa: E402
+                                         orchestrator, planner, router)
 from rsm_thrive.services.llm import FakeLLM  # noqa: E402
 
 CAREERS = electives.load_careers()

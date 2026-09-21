@@ -20,8 +20,7 @@ import pytest
 from django.contrib.auth.models import User
 
 from rsm_thrive.models import Conversation, PlannerSession
-from rsm_thrive.services import (electives, orchestrator, planner,
-                                 router)
+from rsm_thrive.services.courses import electives, orchestrator, planner, router
 from rsm_thrive.services.llm import FakeLLM
 
 pytestmark = pytest.mark.django_db
@@ -184,7 +183,7 @@ class TestACuratedRoleIsAnsweredDeterministically:
         recommending a course."""
         import re
 
-        from rsm_thrive.services.electives import load_catalog
+        from rsm_thrive.services.courses.electives import load_catalog
 
         codes = {course["code"] for course in load_catalog()}
         recommended = re.compile(r"- \*\*([A-Z]{2,4} \d{3}[A-Z]?) —")
@@ -342,7 +341,8 @@ class TestDecliningPlainly:
         type."""
         reply = orchestrator.answer(FakeLLM([]), conversation, "hi there", [])
         assert reply.route == router.UNCLEAR
-        assert "which track" in reply.body
+        # Greeted back, then the three ways in -- see TestAGreetingIsGreetedBack.
+        assert reply.model_note == "greeting" and "your track" in reply.body
 
     def test_unclear_offers_the_three_shapes_once_something_is_known(
             self, conversation):
@@ -550,8 +550,8 @@ class TestANonMsbaCourseCarriesItsEnrolmentTerms:
         assert "MFin" not in label
 
     def test_every_prefix_in_every_bundle_has_stated_terms(self):
-        from rsm_thrive.services.electives import DEPARTMENT_LABELS
-        from rsm_thrive.services import bundles
+        from rsm_thrive.services.courses.electives import DEPARTMENT_LABELS
+        from rsm_thrive.services.courses import bundles
 
         for role_id in planner.load_careers():
             bundle = bundles.bundle_for(role_id) or {}
@@ -786,3 +786,32 @@ class TestAnOutageSaysItIsAnOutage:
                                ("next quarter", "Fall")):
             reply = orchestrator.answer(FakeLLM([]), conversation, said, [])
             assert expected in reply.body, said
+
+
+class TestAGreetingIsGreetedBack:
+    """Seen live: "hi" was answered with the opening's own paragraph in other
+    words, so the second message read as the first one repeating itself. A
+    greeting is answered as a greeting, and the three ways in follow in a
+    different voice."""
+
+    def test_hi_gets_a_hello_and_the_three_ways_in(self, conversation):
+        fake = FakeLLM([])
+        reply = orchestrator.answer(fake, conversation, "hi", [])
+        assert fake.calls == [], "a greeting never needs the model"
+        assert reply.model_note == "greeting"
+        assert reply.body.startswith("Hi! Good to have you here.")
+        for way in ("job in mind", "field, not the job", "No idea yet"):
+            assert way in reply.body
+        assert "what you're aiming for after the programme" not in reply.body
+        assert "Whenever you're ready" not in reply.body, "no nudge under a menu of its own"
+
+    def test_how_are_you_is_answered(self, conversation):
+        reply = orchestrator.answer(FakeLLM([]), conversation, "how's it going?", [])
+        assert reply.body.startswith("Doing well, thanks for asking!")
+
+    def test_with_a_goal_on_file_it_asks_for_the_track(self, conversation):
+        PlannerSession.objects.create(conversation=conversation,
+                                      intake={"goals": ["data-scientist"]})
+        reply = orchestrator.answer(FakeLLM([]), conversation, "hello", [])
+        assert reply.model_note == "greeting"
+        assert "11-month" in reply.body and "job in mind" not in reply.body

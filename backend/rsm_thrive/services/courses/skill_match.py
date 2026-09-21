@@ -70,7 +70,7 @@ import math
 import re
 from dataclasses import dataclass, field as dataclass_field
 from functools import lru_cache
-from rsm_thrive.services.electives import catalog_version, load_catalog
+from rsm_thrive.services.courses.electives import catalog_version, load_catalog
 
 # Keeps "c++", "c#", ".net" and "a/b" in one piece rather than splitting them
 # to noise. Same tokeniser the advisor used, kept deliberately.

@@ -35,6 +35,9 @@
       "senior analyst",
       "insights analyst",
       "reporting analyst"
+    ],
+    "shorthand": [
+      "biz analyst"
     ]
   },
   "bi-analyst": {
@@ -76,6 +79,10 @@
     ],
     "aliases": [
       "business intelligence"
+    ],
+    "shorthand": [
+      "bi",
+      "business intel"
     ]
   },
   "product-analyst": {
@@ -120,6 +127,12 @@
     ],
     "aliases": [
       "product analytics"
+    ],
+    "shorthand": [
+      "pm",
+      "apm",
+      "product management",
+      "product owner"
     ]
   },
   "data-scientist": {
@@ -138,7 +151,6 @@
       "MGTA 464": 3.0,
       "MGTA 463": 1.5,
       "MGTA 458": 1.5,
-      "CSE 254": 1.5,
       "MGTA 402": 0.5,
       "MGTA 460": 0.5
     },
@@ -161,6 +173,10 @@
     "aliases": [
       "data science",
       "applied machine learning"
+    ],
+    "shorthand": [
+      "ds",
+      "data sci"
     ]
   },
   "analytics-engineer": {
@@ -203,6 +219,10 @@
     "aliases": [
       "analytics engineering",
       "data engineering"
+    ],
+    "shorthand": [
+      "data eng",
+      "analytics eng"
     ]
   },
   "marketing-analyst": {
@@ -246,6 +266,11 @@
       "marketing analytics",
       "growth analytics",
       "marketing"
+    ],
+    "shorthand": [
+      "mktg",
+      "growth marketing",
+      "crm analytics"
     ]
   },
   "consultant": {
@@ -288,6 +313,10 @@
     "aliases": [
       "analytics consulting",
       "data consulting"
+    ],
+    "shorthand": [
+      "consulting analyst",
+      "mbb"
     ]
   },
   "fraud-risk-analyst": {
@@ -330,6 +359,9 @@
     "aliases": [
       "fraud analytics",
       "risk analytics"
+    ],
+    "shorthand": [
+      "aml"
     ]
   },
   "operations-supply-chain": {
@@ -370,6 +402,11 @@
     ],
     "aliases": [
       "operations analytics"
+    ],
+    "shorthand": [
+      "ops analyst",
+      "ops analytics",
+      "scm"
     ]
   },
   "pricing-analyst": {
@@ -411,6 +448,10 @@
     "aliases": [
       "pricing analytics",
       "revenue management"
+    ],
+    "shorthand": [
+      "revops",
+      "revenue mgmt"
     ]
   },
   "decision-scientist": {
@@ -452,6 +493,10 @@
     "aliases": [
       "decision science",
       "experimentation analytics"
+    ],
+    "shorthand": [
+      "a/b testing",
+      "ab testing"
     ]
   },
   "ml-engineer": {
@@ -496,6 +541,11 @@
     "aliases": [
       "machine learning engineering",
       "genai engineering"
+    ],
+    "shorthand": [
+      "mle",
+      "ml eng",
+      "ai eng"
     ]
   },
   "healthcare-analyst": {
@@ -541,6 +591,10 @@
     ],
     "aliases": [
       "life sciences analytics"
+    ],
+    "shorthand": [
+      "clinical analytics",
+      "pharma analytics"
     ]
   },
   "finance-quant": {
@@ -586,6 +640,11 @@
       "financial analytics",
       "fintech",
       "financial technology"
+    ],
+    "shorthand": [
+      "fp&a",
+      "quant finance",
+      "quant research"
     ]
   }
 }

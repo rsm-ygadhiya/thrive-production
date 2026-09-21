@@ -13,7 +13,7 @@ import pytest
 from django.contrib.auth.models import User
 
 from rsm_thrive.models import Conversation
-from rsm_thrive.services import planner
+from rsm_thrive.services.courses import planner
 
 pytestmark = pytest.mark.django_db
 
@@ -43,7 +43,7 @@ class TestAmbiguousCourseCodes:
     """The catalog has four Special Topics courses all coded MGTA 495."""
 
     def test_a_shared_code_is_disambiguated_in_the_plan(self, conversation):
-        from rsm_thrive.services import planner
+        from rsm_thrive.services.courses import planner
 
         plan = planner.build_plan({**FULL, "goals": ["consultant"]})
         codes = [r["code"] for q in plan["quarters"] for r in q["courses"]
@@ -51,7 +51,7 @@ class TestAmbiguousCourseCodes:
         assert len(codes) == len(set(codes)), codes
 
     def test_the_bare_code_is_still_available_for_matching(self, conversation):
-        from rsm_thrive.services import planner
+        from rsm_thrive.services.courses import planner
 
         plan = planner.build_plan(FULL)
         for quarter in plan["quarters"]:
@@ -60,7 +60,7 @@ class TestAmbiguousCourseCodes:
                     assert row["baseCode"]
 
     def test_a_disambiguated_code_can_still_be_located(self, conversation):
-        from rsm_thrive.services import planner
+        from rsm_thrive.services.courses import planner
 
         plan = planner.build_plan({**FULL, "goals": ["consultant"]})
         target = next((r for q in plan["quarters"] for r in q["courses"]
@@ -76,19 +76,19 @@ class TestTargetingNote:
     rather than from a catalog tag count that did not predict the outcome."""
 
     def test_a_mostly_breadth_plan_is_flagged(self):
-        from rsm_thrive.services import planner
+        from rsm_thrive.services.courses import planner
 
         plan = planner.build_plan({**FULL, "goals": ["operations-supply-chain"]})
         note = plan["targeting"]
         assert note and note["onGoal"] < note["electiveSlots"]
 
     def test_a_well_targeted_plan_is_not_flagged(self):
-        from rsm_thrive.services import planner
+        from rsm_thrive.services.courses import planner
 
         assert planner.build_plan({**FULL, "goals": ["data-scientist"]})["targeting"] is None
 
     def _on_goal(self, role):
-        from rsm_thrive.services import planner
+        from rsm_thrive.services.courses import planner
 
         plan = planner.build_plan({**FULL, "goals": [role]})
         rows = [r for q in plan["quarters"] for r in q["courses"]
@@ -97,7 +97,7 @@ class TestTargetingNote:
 
     def test_the_note_reports_the_plans_own_numbers(self):
         """Exact rather than derived from a proxy — this is the whole change."""
-        from rsm_thrive.services import planner
+        from rsm_thrive.services.courses import planner
 
         plan = planner.build_plan({**FULL, "goals": ["operations-supply-chain"]})
         rows = [r for q in plan["quarters"] for r in q["courses"]
@@ -114,8 +114,8 @@ class TestTargetingNote:
         which pair it is moves with the student's skill levels — the fragility
         that made the first version of this test wrong.
         """
-        from rsm_thrive.services import planner
-        from rsm_thrive.services.electives import load_careers
+        from rsm_thrive.services.courses import planner
+        from rsm_thrive.services.courses.electives import load_careers
 
         roles = sorted(load_careers())
         pairs = [
@@ -126,14 +126,14 @@ class TestTargetingNote:
         assert pairs, "catalog count would have been a fair proxy after all"
 
     def test_the_note_names_advising_and_the_appointments_tab(self):
-        from rsm_thrive.services import planner
+        from rsm_thrive.services.courses import planner
 
         text = planner.render_plan_markdown(
             planner.build_plan({**FULL, "goals": ["operations-supply-chain"]}))
         assert "Appointments" in text and "advising" in text.lower()
 
     def test_a_flagged_plan_is_still_complete(self):
-        from rsm_thrive.services import planner
+        from rsm_thrive.services.courses import planner
 
         plan = planner.build_plan({**FULL, "goals": ["operations-supply-chain"]})
         assert plan["totals"]["total"] == 50 and plan["unfilled"] == []
@@ -148,7 +148,7 @@ class TestAQuestionIsNotAnAnswer:
     """
 
     def test_a_hypothetical_does_not_overwrite_an_answer_on_file(self):
-        from rsm_thrive.services import planner
+        from rsm_thrive.services.courses import planner
 
         stored = {"track": "11 month", "goals": ["data-scientist"]}
         merged = planner.merge_intake(stored, {"track": "17 month"}, asking=True)
@@ -161,7 +161,7 @@ class TestAQuestionIsNotAnAnswer:
         quieter form: probing every step of the interview, "is next quarter
         heavy?" wrote workload="heavy" from a turn that stated no preference.
         The interview asks again instead."""
-        from rsm_thrive.services import planner
+        from rsm_thrive.services.courses import planner
 
         merged = planner.merge_intake({"track": "11 month"},
                                       {"goals": ["data-scientist"]}, asking=True)
@@ -169,7 +169,7 @@ class TestAQuestionIsNotAnAnswer:
         assert merged["track"] == "11 month", "what was on file stays on file"
 
     def test_a_plain_answer_still_overwrites(self):
-        from rsm_thrive.services import planner
+        from rsm_thrive.services.courses import planner
 
         merged = planner.merge_intake({"track": "17 month"},
                                       {"track": "11 month"}, asking=False)
@@ -181,7 +181,7 @@ class TestAQuestionIsNotAnAnswer:
         "can I change this later?",
     ])
     def test_these_read_as_questions(self, text):
-        from rsm_thrive.services import planner
+        from rsm_thrive.services.courses import planner
 
         assert planner.is_question(text)
 
@@ -190,7 +190,7 @@ class TestAQuestionIsNotAnAnswer:
         "python 4 sql 3", "",
     ])
     def test_these_read_as_answers(self, text):
-        from rsm_thrive.services import planner
+        from rsm_thrive.services.courses import planner
 
         # "11 month?" is a hedged ANSWER, not a question -- a trailing "?" alone
         # must not be enough, or an uncertain student stops being heard.
@@ -206,7 +206,7 @@ class TestThePlanIsNotReprintedAtEveryTurn:
         "show me the plan", "print it again", "the plan again", "my plan",
     ])
     def test_these_ask_for_the_plan(self, text):
-        from rsm_thrive.services.bots import _wants_the_plan
+        from rsm_thrive.services.courses.replies import _wants_the_plan
 
         assert _wants_the_plan(text)
 
@@ -214,7 +214,7 @@ class TestThePlanIsNotReprintedAtEveryTurn:
         "thanks!", "ok", "hmm", "how do I enrol?", "can you email this to me?",
     ])
     def test_these_do_not(self, text):
-        from rsm_thrive.services.bots import _wants_the_plan
+        from rsm_thrive.services.courses.replies import _wants_the_plan
 
         assert not _wants_the_plan(text)
 
@@ -231,7 +231,7 @@ class TestAnIncidentalWordIsNotAnAnswer:
         "should I pick data scientist?", "was 17 month the longer one?",
     ])
     def test_these_read_as_questions(self, text):
-        from rsm_thrive.services import planner
+        from rsm_thrive.services.courses import planner
 
         assert planner.is_question(text), text
 
@@ -241,12 +241,12 @@ class TestAnIncidentalWordIsNotAnAnswer:
     ])
     def test_answers_are_still_answers(self, text):
         # A hedged answer starts with its own value, never with an auxiliary.
-        from rsm_thrive.services import planner
+        from rsm_thrive.services.courses import planner
 
         assert not planner.is_question(text), text
 
     def test_the_measured_case_end_to_end(self):
-        from rsm_thrive.services import planner
+        from rsm_thrive.services.courses import planner
 
         extracted = planner.normalise_intake({"workload": "heavy"})
         assert extracted == {"workload": "heavy"}, "the extractor does report it"

@@ -19,7 +19,7 @@ import pytest
 from django.contrib.auth.models import User
 
 from rsm_thrive.models import ChatTurnLog, Conversation, PlannerSession
-from rsm_thrive.services import orchestrator, planner, router, skill_match
+from rsm_thrive.services.courses import orchestrator, planner, router, skill_match
 from rsm_thrive.services.llm import FakeLLM
 
 pytestmark = pytest.mark.django_db

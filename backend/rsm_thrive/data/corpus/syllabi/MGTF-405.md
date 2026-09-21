@@ -11,13 +11,13 @@ technical_level: 4
 workload: "heavy"
 workload_basis: "Quantitative MFin coursework; letter grades only."
 grading: "See department syllabus."
-offerings: [{"term": "FA26", "season": "FA", "instructor": "Timmermann, Allan"}, {"term": "varies", "season": "FA", "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."}, {"term": "varies", "season": "WI", "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."}, {"term": "varies", "season": "SP", "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."}]
+offerings: [{"term": "FA26", "season": "FA", "instructor": "Timmermann, Allan"}]
 prerequisites: "Restricted to MFin/MBA or by consent of instructor."
 topics: ["time-series analysis", "forecasting models", "forecast evaluation", "financial data"]
 skills: ["building and evaluating forecasting models for finance"]
 tools: ["R", "Python"]
 career_tags: ["finance", "machine-learning"]
-notes: "Pre-approved MSBA elective (MFin course — enrollment by consent)."
+notes: "Pre-approved MSBA elective (MFin course — enrollment by consent). Scheduled for Fall 2026; no Winter or Spring section is on the schedule."
 syllabi: ["MGTF 405 Business Forecasting (Timmermann) FA26.txt"]
 ---
 # MGTF 405 — Business Forecasting

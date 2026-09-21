@@ -36,7 +36,7 @@ django.setup()
 from django.contrib.auth.models import User  # noqa: E402
 
 from rsm_thrive.models import Conversation  # noqa: E402
-from rsm_thrive.services import electives, orchestrator, planner  # noqa: E402
+from rsm_thrive.services.courses import electives, orchestrator, planner  # noqa: E402
 from rsm_thrive.services.llm import get_llm  # noqa: E402
 
 random.seed(11)

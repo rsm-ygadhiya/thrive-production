@@ -52,7 +52,7 @@ def _cold_retrieval_cache():
     the one case the fingerprint cannot see, and tests are exactly where
     someone does that.
     """
-    from rsm_thrive.services import retrieval
+    from rsm_thrive.services.resources import retrieval
     retrieval.forget_corpus()
     yield
     retrieval.forget_corpus()

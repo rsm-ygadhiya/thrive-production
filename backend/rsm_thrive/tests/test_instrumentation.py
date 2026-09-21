@@ -16,9 +16,9 @@ from django.core.management.base import CommandError
 from django.utils import timezone
 
 from rsm_thrive.models import ChatTurnLog, TurnFeedback
-from rsm_thrive.services.bots import BotReply
+from rsm_thrive.services.reply import BotReply
 from rsm_thrive.services.embeddings import FakeEmbeddings
-from rsm_thrive.services.ingest import ingest_document
+from rsm_thrive.services.resources.ingest import ingest_document
 from rsm_thrive.testing import (make_conversation, make_feedback, make_message,
                                 make_student, make_turn_log)
 from rsm_thrive.views import chat as chat_views

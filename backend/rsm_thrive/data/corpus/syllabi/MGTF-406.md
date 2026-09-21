@@ -11,13 +11,13 @@ technical_level: 2
 workload: "moderate"
 workload_basis: "MFin lecture/case coursework."
 grading: "See department syllabus."
-offerings: [{"term": "SP26", "season": "SP", "instructor": "Engelberg"}, {"term": "varies", "season": "FA", "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."}, {"term": "varies", "season": "WI", "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."}, {"term": "varies", "season": "SP", "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."}]
+offerings: [{"term": "SP26", "season": "SP", "instructor": "Engelberg"}]
 prerequisites: "Letter grades only; MFin course."
 topics: ["investor psychology", "market anomalies", "biases in financial decisions", "behavioral asset pricing"]
 skills: ["applying behavioral insights to investment and financial decisions"]
 tools: []
 career_tags: ["finance", "people-decisions"]
-notes: "Pre-approved MSBA elective (MFin course — enrollment by consent)."
+notes: "Pre-approved MSBA elective (MFin course — enrollment by consent). Runs in Spring; no Fall or Winter section is on the schedule."
 syllabi: ["MGTF 406 Behavioral Finance (Engelberg) SP26.txt"]
 ---
 # MGTF 406 — Behavioral Finance

@@ -6,7 +6,7 @@ from django.views.decorators.http import require_http_methods
 from rsm_thrive.http import (BadRequest, api_login_required, json_error, json_ok,
                              parse_body, profile_required)
 from rsm_thrive.models import CoursePlan
-from rsm_thrive.services import planner
+from rsm_thrive.services.courses import planner
 
 
 def _bad_request_as_400(view):

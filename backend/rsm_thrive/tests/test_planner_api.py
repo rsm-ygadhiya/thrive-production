@@ -234,7 +234,7 @@ class TestAMalformedBodyIsA400NotA500:
         assert response.status_code == 400, response.content[:200]
 
     def test_validate_intake_reports_them_as_problems(self):
-        from rsm_thrive.services import planner
+        from rsm_thrive.services.courses import planner
 
         problems = planner.validate_intake({"track": {"a": 1}, "goals": [{"b": 2}]})
         assert problems, "an unhashable value must be a problem, not an exception"

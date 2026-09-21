@@ -5,7 +5,7 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 
 from rsm_thrive.services.embeddings import FakeEmbeddings
-from rsm_thrive.services.ingest import ingest_document
+from rsm_thrive.services.resources.ingest import ingest_document
 
 pytestmark = pytest.mark.django_db
 

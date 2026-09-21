@@ -41,79 +41,25 @@ this route is allowed to ask a question, and it asks exactly one.
 """
 
 from rsm_thrive.models import CoursePlan, StudentProfile
-from rsm_thrive.services import planner
-from rsm_thrive.services.electives import load_catalog
-from rsm_thrive.services.llm import parse_llm_json
+from rsm_thrive.services.courses import planner, reading
+from rsm_thrive.services.courses.electives import load_catalog
 
 TRACKS = ("11 month", "17 month")
 
-EXTRACT_SYSTEM = (
-    "You read one message from an MSBA student about where they are in the "
-    "programme, and extract ONLY what they actually stated. Reply with JSON "
-    "only, with exactly these keys: track, previous_track, current_quarter, "
-    "finish_on_time, completed_codes.\n"
-    "- track: the track they are on NOW. One of \"11 month\", \"17 month\", or "
-    "null. If they say they switched, this is the one they switched TO.\n"
-    "- previous_track: the track they switched away from, or null.\n"
-    "- current_quarter: the quarter they say they are in, in their own words "
-    "(\"winter\", \"second fall\", \"fall of my second year\"), or null.\n"
-    "- finish_on_time: true if they asked about finishing on time or by a "
-    "date, false otherwise.\n"
-    "- completed_codes: course codes they say they have already finished, as "
-    "written (e.g. [\"MGTA 451\"]). Empty list if they named none.\n"
-    "NEVER infer a value they did not state. A guessed quarter produces a plan "
-    "that is wrong about every date in it.")
+# What the model is told when explaining a computed ledger:
+# `skills/explain_position/SKILL.md`.
+EXPLAIN_POSITION = "explain_position"
 
-EXPLAIN_SYSTEM = (
-    "You are THRIVE, advising one Rady MSBA student on a plan that has ALREADY "
-    "BEEN COMPUTED for them. You are given a ledger of facts and the plan.\n\n"
-    "ABSOLUTE RULE: every number, course code, unit count, quarter and "
-    "requirement in your reply must come from the ledger you were given, "
-    "copied exactly. Do NOT add, total, subtract or estimate anything. Do NOT "
-    "state a prerequisite, a deadline, a fee or a policy — you have not been "
-    "given any and you must not supply one. If something is not in the ledger, "
-    "say it is not something you can confirm and point them at MSBA advising "
-    "(bookable from the Appointments tab).\n\n"
-    "Your job is the part arithmetic cannot do: say what the situation MEANS "
-    "and what the tradeoffs are. Be direct and specific. Lead with whether the "
-    "plan finishes the degree in the quarters that remain. Name the real "
-    "pressures — a heavy quarter, a required course with nowhere left to sit, "
-    "electives given up to fit the core. If the ledger shows outstanding units "
-    "or unscheduled requirements, say plainly that this does not finish on "
-    "time as it stands and what the options are.\n\n"
-    "At most 200 words. No headings. Do not restate the whole plan — it is "
-    "printed above your reply.")
+# The position is read by the planner's one reading skill (`read_turn`,
+# section "where they are"); see `router.position_of`. What this module owns
+# is checking it against the two tracks and the quarters of the track.
 
 
-# ---------------------------------------------------------------------------
-# Reading the position
-# ---------------------------------------------------------------------------
-
-def extract_position(llm, question):
+def extract_position(llm, question, context=None):
     """What the student said about where they are. Never what they implied."""
-    try:
-        raw = llm.chat(EXTRACT_SYSTEM,
-                       [{"role": "user", "content": str(question)}],
-                       json_mode=True)
-    except Exception:
-        return {}
-    parsed = parse_llm_json(raw or "")
-    if not isinstance(parsed, dict):
-        return {}
-    out = {}
-    for key in ("track", "previous_track"):
-        value = parsed.get(key)
-        if isinstance(value, str) and value.strip() in TRACKS:
-            out[key] = value.strip()
-    said = parsed.get("current_quarter")
-    if isinstance(said, str) and said.strip():
-        out["said_quarter"] = said.strip()[:60]
-    out["finish_on_time"] = bool(parsed.get("finish_on_time"))
-    codes = parsed.get("completed_codes")
-    if isinstance(codes, list):
-        out["completed_codes"] = [str(code).strip().upper() for code in codes
-                                  if isinstance(code, (str, int))][:20]
-    return out
+    from rsm_thrive.services.courses import router
+
+    return router.read_position(llm, question, context)
 
 
 def _profile_track(user):
@@ -285,13 +231,11 @@ def explain(llm, ledger, plan):
     payload = ("Ledger (the ONLY source of facts you may use):\n"
                + json.dumps(ledger, indent=1)
                + "\n\nExplain what this means for the student.")
-    try:
-        return (llm.chat(EXPLAIN_SYSTEM,
-                         [{"role": "user", "content": payload}]) or "").strip()
-    except Exception:
-        # An explanation is a courtesy; the ledger and the plan are the answer.
-        # Losing the paragraph must never lose the numbers.
-        return ""
+    # An explanation is a courtesy; the ledger and the plan are the answer.
+    # Losing the paragraph must never lose the numbers -- `say` returns ""
+    # when the model fails, and the caller prints the ledger regardless.
+    return reading.say(EXPLAIN_POSITION, llm,
+                       [{"role": "user", "content": payload}])
 
 
 NO_FINISH_NOTE = (
@@ -305,7 +249,7 @@ DISCLAIMER = (
     "schedule with MSBA advising before you book._")
 
 
-def answer(llm, user, question, stored=None):
+def answer(llm, user, question, stored=None, context=None, said=None):
     """(body, asked_for, resolved) for a situational question.
 
     `resolved` is everything the route worked out this turn, including a
@@ -313,8 +257,23 @@ def answer(llm, user, question, stored=None):
     stops the follow-up loop: asked for a track and then for a quarter, the
     second turn states only the quarter, and a route that cannot remember the
     first answer asks for the track again forever.
+
+    `context` is what the planner knows about the conversation, handed to the
+    reading so that a one-word answer to the question this route asked last
+    turn is read as that answer. `said` is a position already read off this
+    turn by the router (`Route.position`), so the route that classified the
+    turn does not read it twice.
     """
-    said = extract_position(llm, question)
+    if said is None:
+        said = extract_position(llm, question, context)
+    if planner.is_hypothetical(question) and (stored or {}).get("track"):
+        # "what if i had gone for the 17 month instead", asked by a student
+        # whose track is on file, names the OTHER track -- and the reader
+        # returned it as the one they are on, so the route asked which
+        # quarter of the 17-month track they were in. A what-if compares; it
+        # does not move them. The track on file stands.
+        said = {key: value for key, value in said.items()
+                if key not in ("track", "previous_track")}
     position, missing = resolve_position(user, said, stored)
     if missing:
         return ask_for(missing, position.get("track")), missing, position

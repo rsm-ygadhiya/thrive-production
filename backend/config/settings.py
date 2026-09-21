@@ -166,6 +166,11 @@ THRIVE_SEARCH = os.environ.get("THRIVE_SEARCH", "duckduckgo")
 THRIVE_SEARCH_API_KEY = os.environ.get("THRIVE_SEARCH_API_KEY", "")
 TRITONAI_API_KEY = os.environ.get("TRITONAI_API_KEY", "")
 TRITONAI_MODEL = os.environ.get("TRITONAI_MODEL", "claude-sonnet-5")
+# The model the READING skills run on (`services/skills.py` `read`): the
+# small JSON extractions that decide a route or re-word a question. Unset,
+# they run on TRITONAI_MODEL. A faster model here roughly halves the time a
+# reading adds to a turn; the answers themselves always use TRITONAI_MODEL.
+TRITONAI_READER_MODEL = os.environ.get("TRITONAI_READER_MODEL", "")
 # Per call, and for the whole retry ladder. The SDK's own default is ten
 # minutes, which is not a timeout for somebody waiting on a chat reply, and
 # three attempts plus the 15s and 30s waits between them took a measured 149

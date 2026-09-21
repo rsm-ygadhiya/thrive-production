@@ -14,9 +14,9 @@ import pytest
 
 from rsm_thrive.management.commands.build_catalog import (
     SYLLABI, build, frontmatter)
-from rsm_thrive.services import electives
+from rsm_thrive.services.courses import electives
 
-CATALOG = Path(electives.__file__).resolve().parents[1] / "data/catalog/courses.json"
+CATALOG = Path(electives.__file__).resolve().parents[2] / "data/catalog/courses.json"
 
 
 def markdown_files():
@@ -141,7 +141,7 @@ class TestSyllabiStayOutOfTheFaqCorpus:
         syllabi, which carry no source URL -- so the rescope that was meant to
         fix this reported "0 documents" and changed nothing."""
         source = pathlib.Path(
-            electives.__file__).resolve().parents[1] / \
+            electives.__file__).resolve().parents[2] / \
             "management/commands/ingest_corpus.py"
         text = source.read_text()
         assert 'document.kind != "syllabus"' in text, (

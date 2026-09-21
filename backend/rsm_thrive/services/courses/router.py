@@ -32,15 +32,15 @@ assistant and a form: the form asks first and always, this asks last and rarely.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 
-from rsm_thrive.services.electives import (catalog_version, load_careers,
+from rsm_thrive.services.courses.electives import (catalog_version, load_careers,
                                             load_catalog)
-from rsm_thrive.services.grounded_course_advisor.advisor import (
+from rsm_thrive.services.courses.advisor import (
     _target_field, is_industry_course_question,
 )
-from rsm_thrive.services.llm import parse_llm_json
+from rsm_thrive.services.courses import understanding, reading
 
 ROLE = "role"
 INDUSTRY = "industry"
@@ -76,12 +76,41 @@ class Route:
     role_id: str = ""
     #: The student's own words for a role we have no bundle for.
     unmatched_role: str = ""
+    #: The student's own words when `role_id` is a READING of them rather than
+    #: a title they typed -- shorthand ("pm") or the model's curated reading.
+    #: The reply confirms it back instead of acting on it silently.
+    reading: str = ""
     #: The industry or field named, in the student's own words.
     industry: str = ""
     #: The student's own words for a single quarter they asked about.
     quarter: str = ""
     #: How the decision was reached, for the trace view.
     why: str = ""
+    #: What the turn was DOING, when the model read it: "answer", "ask",
+    #: "accept", "decline", "greet", ... (see `skills/read_turn/SKILL.md`).
+    #: Empty when a rule decided.
+    act: str = ""
+    #: Intake values the turn stated that no rule could see -- a track, a
+    #: load, finished courses, self-rated skills -- validated against their
+    #: closed sets. The orchestrator puts them on file whatever the route.
+    learned: dict = field(default_factory=dict)
+    #: Something to do to a plan already on screen, when the model read one:
+    #: {"name": "swap", "courses": [...]} and so on. Empty otherwise.
+    action: dict = field(default_factory=dict)
+    #: The student said they have no target yet, or asked for the options.
+    wants_menu: bool = False
+    #: The curated `industries.json` id the model read the field as, from the
+    #: closed list of six, when no alias on disk matched the words.
+    industry_id: str = ""
+    #: 1-based positions on the menu on screen that the turn refers to, when
+    #: the model read one -- "the analyst one", "the last two".
+    menu_pick: list = field(default_factory=list)
+    #: The turn asks how the picked items differ, rather than choosing one.
+    menu_compare: bool = False
+    #: Where the student says they are, when the turn described it -- the
+    #: situational route's input, validated: track, previous_track,
+    #: said_quarter, finish_on_time, completed_codes. See `position_of`.
+    position: dict = field(default_factory=dict)
 
 
 # A department prefix from the catalog itself, not any two-to-four letters.
@@ -149,14 +178,37 @@ explain describe is are does do worth like good hard easy difficult
 
 # A student describing WHERE THEY ARE. Both halves are required: "I switched"
 # on its own could be about a laptop, and "winter" on its own is a season.
+# A switch counts only with track-shaped words after it ("switched to",
+# "switching tracks"): "im switching into analytics. is MGTA 479 offered in
+# winter?" carried "switching" and "winter" and was ruled situational, over
+# a course code and a catalog word.
 _POSITION_WORDS = re.compile(
-    r"\b(switch(?:ed|ing)?|transferr?(?:ed|ing)?|moved|already in|currently in|"
+    r"\b((?:switch(?:ed|ing)?|transferr?(?:ed|ing)?|moved)"
+    r"(?=\s+(?:to|from|tracks?|programs?|programmes?|over|onto|between)\b)|"
+    r"already in|currently in|"
     r"i'?m in|im in|behind|catch up|caught up|left|remaining|remain|finish|"
     r"finishing|graduat\w*|on time|drop(?:ped)?|withdrew|retake|retaking|"
     r"deferred|leave of absence|part[- ]time)\b", re.IGNORECASE)
+# "fall" is a season only when it is not "fall behind": the worrier's "i
+# really dont want to fall behind" carried both a season and a position word
+# and made an industry question situational.
 _PROGRAMME_WORDS = re.compile(
-    r"\b(11[- ]month|17[- ]month|track|quarter|quarters|winter|spring|fall|"
-    r"summer|units|unit|degree|programme|program|plan of study)\b",
+    r"\b(11[- ]month|17[- ]month|track|quarter|quarters|winter|spring|"
+    r"fall(?!\s+behind)|summer|units|unit|degree|programme|program|plan of study)\b",
+    re.IGNORECASE)
+
+# Words that make a sentence about the student's OWN standing in the
+# programme -- a track named, a switch, courses already done. With one of
+# these, a course code in the sentence is part of the position ("I've done
+# MGTA 464 and switched to 11 month, what's left"); without one, a course
+# code plus a catalog word is a question about that course, whatever worry
+# follows it ("is MGTA 479 offered in winter? will that be a problem").
+# "behind" is deliberately absent: "i really dont want to fall behind" is a
+# worry after a course question, not a position, and with a real season in
+# the sentence ("offered in winter?") it made the question situational.
+_OWN_STANDING = re.compile(
+    r"\b(11[- ]?month|17[- ]?month|track|switch\w*|transferr?\w*|already|"
+    r"i'?ve (?:done|taken|finished|completed)|completed|left|remaining)\b",
     re.IGNORECASE)
 
 
@@ -189,6 +241,47 @@ def _role_titles_for(_version):
 
 def _role_titles():
     return _role_titles_for(catalog_version())
+
+
+@lru_cache(maxsize=4)
+def _shorthand_for(_version):
+    """What students TYPE for a profile, longest first: "pm", "ds", "fp&a".
+
+    Kept apart from `titles` and `aliases` for two reasons. It is never shown
+    -- nobody is hired as a "pm" -- and it is matched with a guard the others
+    do not need: "pm" next to a digit is a time of day. Measured live, "i want
+    to be a pm" was refused for want of this list, and the student had to type
+    "product manager" to reach the profile that title already sat under.
+    """
+    out = []
+    for role_id, role in load_careers().items():
+        for short in (role.get("shorthand") or []):
+            out.append((str(short).lower(), role_id))
+    return sorted(out, key=lambda row: -len(row[0]))
+
+
+def _shorthand():
+    return _shorthand_for(catalog_version())
+
+
+def shorthand_match(text):
+    """The role id whose shorthand this text contains, or "".
+
+    Longest first, so "quant research" is read before "quant" could be, and
+    never inside a time of day -- see `understanding.shorthand_pattern`.
+    """
+    for short, role_id in _shorthand():
+        if understanding.shorthand_pattern(short).search(text):
+            return role_id
+    return ""
+
+
+# Phrasing that puts the next word in the student's PAST or present job,
+# not their goal: "working in", "been in", "years in", "background in".
+_BACKGROUND = re.compile(
+    r"\b(?:worked|working|been|background|years?|experience|experienced|"
+    r"coming|came|currently|previously|spent|career)\s+(?:in|from|of|as|at)"
+    r"\s+(?:the\s+|a\s+)?$")
 
 
 # A word this long may be off by one character and still be the same word.
@@ -252,13 +345,27 @@ def role_match(question):
     said = re.findall(r"[a-z&]+", text)
 
     def fuzzy(title):
+        # A TYPED title with a slip in it -- so its words sit together, in
+        # order. Matching each word anywhere in the sentence read "marketing
+        # ... analytics" out of "working in marketing for 6 years and im
+        # switching into analytics" as the title "marketing analytics".
         wanted = title.split()
-        return (len(wanted) >= 2
-                and all(any(_within_one_edit(word, target) for word in said)
-                        for target in wanted))
+        if len(wanted) < 2:
+            return False
+        return any(all(_within_one_edit(said[i + k], wanted[k]) for k in range(len(wanted)))
+                   for i in range(len(said) - len(wanted) + 1))
 
     for title, role_id in titles:
-        if re.search(rf"\b{re.escape(title)}\b", text):
+        hit = re.search(rf"\b{re.escape(title)}\b", text)
+        if hit and " " not in title and _BACKGROUND.search(text[:hit.start()]):
+            # A ONE-WORD alias inside a life story is where they came FROM.
+            # "i've been working in marketing for 6 years and im switching
+            # into analytics" was ruled the Marketing profile on the word
+            # "marketing". The same word after "i want to work in" is still
+            # a goal and still rules; only the background phrasing is
+            # skipped, and the reading skill sees the whole sentence.
+            continue
+        if hit:
             # THE MORE SPECIFIC READING WINS, even over an exact match.
             # "i wanna be a helthcare data analyst" contains "data analyst"
             # exactly, and that returned Business Analyst before the fuzzy
@@ -274,6 +381,13 @@ def role_match(question):
                 if exact_words <= set(longer.split()) and fuzzy(longer):
                     return longer_id, False
             return role_id, True
+    # SHORTHAND before slop. "pm" is one word and two letters, which the fuzzy
+    # pass rightly refuses to guess at; it is not a guess when the profile
+    # lists it. Reported as a reading, so the reply confirms "pm" back as the
+    # profile it stands for rather than acting on it silently.
+    short_id = shorthand_match(text)
+    if short_id:
+        return short_id, False
     for title, role_id in titles:
         if fuzzy(title):
             return role_id, False
@@ -283,6 +397,25 @@ def role_match(question):
 def matched_role(question):
     """The curated role id this question names, or ""."""
     return role_match(question)[0]
+
+
+def matched_title(question):
+    """The exact words -- title, alias, short label or shorthand -- that
+    `role_match` would resolve in this question, longest first, or "".
+
+    For a caller that needs to know WHAT matched rather than what it resolved
+    to: an alias that is also a course title ("fraud analytics") is a role to
+    one reader and a course to another, and only the words themselves tell
+    the caller to ask.
+    """
+    text = " ".join((question or "").lower().split())
+    for title, _role_id in _role_titles():
+        if re.search(rf"\b{re.escape(title)}\b", text):
+            return title
+    for short, _role_id in _shorthand():
+        if understanding.shorthand_pattern(short).search(text):
+            return short
+    return ""
 
 
 # Words that name a JOB rather than a domain. Used only to decide whether to
@@ -532,9 +665,15 @@ def rule_route(question):
         return Route(CAREERS, why="asked which careers this planner knows")
     if asks_which_courses(text):
         return Route(CATALOG, why="asked what the catalog holds, overall")
+    about_a_course = names_a_course(text) and bool(_words(text) & _FACTUAL_WORDS)
+    if about_a_course and not _OWN_STANDING.search(text):
+        # A course question first when nothing in the sentence is about the
+        # student's own standing. "is MGTA 479 offered in winter? will that
+        # be a problem" carried "winter" and read as situational.
+        return Route(FACTUAL, why="named a course and asked a catalog question")
     if _is_situational(text):
         return Route(SITUATIONAL, why="named a position in the programme")
-    if names_a_course(text) and (_words(text) & _FACTUAL_WORDS):
+    if about_a_course:
         return Route(FACTUAL, why="named a course and asked a catalog question")
     # A turn that is ONLY a course code is about that course. "MGTA 458" on
     # its own carries no question word at all, and the rule above therefore
@@ -578,45 +717,74 @@ def rule_route(question):
     return None
 
 
-CLASSIFY_SYSTEM = (
-    "You route one question from a Rady MSBA student to the part of the "
-    "advising tool that can answer it. Reply with JSON only: "
-    "{\"route\": \"...\", \"confidence\": 0.0-1.0, \"role\": \"...\", "
-    "\"industry\": \"...\"}.\n\n"
-    "The routes:\n"
-    "- \"role\": they named a target job and want courses for it.\n"
-    "- \"industry\": they named an industry, sector or field (aerospace, food, "
-    "healthcare, sport) and want courses for it. Use this when they named a "
-    "FIELD rather than a JOB.\n"
-    "- \"combination\": they named BOTH a job and an industry (\"data "
-    "scientist in the food industry\").\n"
-    "- \"factual\": a question about what a course IS — its prerequisites, "
-    "units, term, workload, content, or what the programme requires. Also use "
-    "this for questions about the catalog as a whole (\"what electives do you "
-    "have\").\n"
-    "- \"quarter\": what to take in ONE named quarter (\"what should I take "
-    "in Winter?\", \"just plan my spring\"). Put the quarter's name in "
-    "\"quarter\".\n"
-    "- \"situational\": their own position in the programme — a track switch, "
-    "the quarter they are in, falling behind, finishing on time, what is left "
-    "to take. Anything that depends on where THEY are.\n"
-    "- \"out-of-scope\": not about MSBA courses, this programme, or their "
-    "studies at all. Trivia, weather, sport, personal advice, asking you to do "
-    "their coursework. Say so plainly rather than answering.\n"
-    "- \"unclear\": you genuinely cannot tell, and the answers the routes would "
-    "give are very different. Use this sparingly — prefer a route.\n\n"
-    "\"role\" is the job in the student's own words, or empty. \"industry\" is "
-    "the field in their own words, or empty. \"quarter\" is the term they "
-    "named, or empty. \"confidence\" is how sure you are about the route, "
-    "honestly.")
+# The classifier's instructions live in `skills/read_turn/SKILL.md`, not
+# here. What used to be a string in this module asking for a route name is
+# now a skill asking for a reading of the whole turn -- route AND every
+# planning fact the turn states -- so that a phrasing nobody tested for still
+# lands somewhere the code can act on. See `services/skills/__init__.py`.
+READ_TURN = "read_turn"
 
 
-def _model_route(llm, question):
-    try:
-        raw = llm.chat(CLASSIFY_SYSTEM,
-                       [{"role": "user", "content": str(question)}],
-                       json_mode=True)
-    except Exception:
+def _learned_from_reading(turn, question):
+    """Intake values a reading states outright, validated. Deterministic."""
+    learned = {}
+    track = reading.track_of(turn.get("track"))
+    if track:
+        learned["track"] = track
+    load = reading.load_of(turn.get("load"))
+    if load:
+        learned["workload"] = load
+    # By code or by title -- "I already did fraud analytics" names a course
+    # as surely as "MGTA 463" does, and the validator only keeps a title that
+    # matches exactly one catalog row.
+    codes = reading.courses_of(turn.get("completed_codes"))
+    if codes:
+        learned["completed_codes"] = codes
+    learned.update(reading.ratings_of(turn.get("skills")))
+    return learned
+
+
+PLAN_ACTIONS = frozenset({"next", "start_review", "finalise", "show_plan",
+                          "swap", "alternatives", "explain", "set_load",
+                          "switch_route"})
+
+
+def _action_from_reading(turn):
+    """What the reading asks to be done to a plan on screen, validated."""
+    name = reading.one_of(turn.get("plan_action"), PLAN_ACTIONS)
+    if not name:
+        return {}
+    action = {"name": name}
+    courses = reading.courses_of(turn.get("courses"))
+    if courses:
+        action["courses"] = courses
+    load = reading.load_of(turn.get("load"))
+    if load:
+        action["load"] = load
+    quarter = reading.words_of(turn.get("quarter"), 40)
+    if quarter:
+        action["quarter"] = quarter
+    choice = reading.route_choice_of(turn.get("route_choice"))
+    if choice:
+        action["route_choice"] = choice
+    return action
+
+
+ACTS = frozenset({"answer", "request", "ask", "correct", "accept", "decline",
+                  "greet", "thank", "chat"})
+
+
+def model_route(llm, question, context=None):
+    """The `read_turn` skill's route for a question, with everything it read.
+
+    Public for the one caller that needs a reading of a turn the rules HAVE
+    placed -- see `orchestrator.answer`, where a profile alias that is also a
+    course title is decided by the skill rather than by the rule.
+    """
+    turn = reading.read(READ_TURN, llm, question, context,
+                       roster=understanding.roster(),
+                       industries=understanding.industry_roster())
+    if turn.degraded:
         # SAY the model is unreachable rather than picking a route without it.
         #
         # This used to default to FACTUAL, on the reasoning that a catalog
@@ -627,42 +795,166 @@ def _model_route(llm, question):
         # down (a lapsed Codex entitlement and an exhausted TritonAI budget)
         # and the app spent ten turns insisting it had no material.
         return Route(DEGRADED, why="the language model could not be reached")
-    parsed = parse_llm_json(raw or "")
-    if not isinstance(parsed, dict):
+    parsed = turn.raw
+    if not parsed:
         return Route(UNCLEAR, why="classifier returned nothing usable")
+    # Everything the turn STATED travels with the route whatever the route
+    # is, so a turn the classifier could not place still puts its track or
+    # its load on file. Read before the route is judged, because an "unclear"
+    # that carries the answer to the pending question is not unclear at all.
+    act = reading.one_of(parsed.get("act"), ACTS)
+    learned = _learned_from_reading(turn, question)
+    action = _action_from_reading(turn)
+    wants_menu = reading.flag_of(parsed.get("wants_menu"))
+    position = position_of(parsed)
+    menu_pick = _positions_of(parsed.get("menu_pick"))
+    menu_compare = reading.flag_of(parsed.get("menu_compare"))
     name = str(parsed.get("route") or "").strip().lower()
     if name not in ROUTES:
-        return Route(UNCLEAR, why=f"classifier returned unknown route {name!r}")
-    try:
-        confidence = float(parsed.get("confidence"))
-    except (TypeError, ValueError):
-        confidence = 0.0
-    confidence = max(0.0, min(1.0, confidence))
+        return Route(UNCLEAR, why=f"classifier returned unknown route {name!r}",
+                     act=act, learned=learned, action=action,
+                     wants_menu=wants_menu, menu_pick=menu_pick,
+                     menu_compare=menu_compare, position=position)
+    confidence = turn.confidence
     role_said = str(parsed.get("role") or "").strip()[:60]
     industry = str(parsed.get("industry") or "").strip()[:60]
     quarter = str(parsed.get("quarter") or "").strip()[:40]
-    if confidence < MIN_CONFIDENCE and name != OUT_OF_SCOPE:
+    if name == UNCLEAR or (confidence < MIN_CONFIDENCE and name != OUT_OF_SCOPE):
         # Out of scope is exempt: a low-confidence "this isn't about the
         # programme" still means the model saw nothing it recognised, and
         # asking a clarifying question about the weather is worse than saying
         # plainly that it is not something this tool does.
-        return Route(UNCLEAR, confidence, why=f"low confidence on {name!r}")
+        #
+        # An unclear reading still carries the JOB the student named, when
+        # they named one: "i want to be a yoga instructor? what happens if i
+        # get this wrong" came back unclear, and the generic opening asked
+        # what they were aiming for. `unmatched_role` lets the orchestrator
+        # refuse it as the uncovered job it is.
+        return Route(UNCLEAR, confidence,
+                     why=("classified unclear" if name == UNCLEAR
+                          else f"low confidence on {name!r}"),
+                     unmatched_role=role_said if not matched_role(role_said) else "",
+                     act=act, learned=learned, action=action,
+                     wants_menu=wants_menu, menu_pick=menu_pick,
+                     menu_compare=menu_compare, position=position)
     route = Route(name, confidence, industry=industry,
-                  quarter=quarter or named_quarter(question), why="classified")
+                  quarter=quarter or named_quarter(question), why="classified",
+                  act=act, learned=learned, action=action,
+                  wants_menu=wants_menu, menu_pick=menu_pick,
+                  menu_compare=menu_compare, position=position)
     if name in (ROLE, COMBINATION):
         # The model may name a role; only `careers.json` may resolve one. It
         # is asked what the STUDENT said, and the curated table decides whether
         # that is a role we serve -- which is what keeps the deterministic path
         # deterministic even when a model chose the route into it.
         route.role_id = matched_role(role_said) or matched_role(question)
-        if not route.role_id:
-            route.unmatched_role = role_said
+        if not route.role_id and role_said:
+            # Nothing on disk matched the words. The model was ALSO asked
+            # which curated profile, if any, those words denote -- from the
+            # closed list, by id -- and `understanding.curated_reading` throws
+            # away anything that is not one of ours. A confident reading is
+            # acted on AND confirmed back (`Route.reading`), the way a
+            # misspelled title is; anything less stays an uncovered role.
+            #
+            # Only when the student typed a JOB (`role_said`). "i want to
+            # work in financial services" names a field and no job, and the
+            # model still offered the Financial Analytics profile with
+            # confidence -- a field mapped onto a career is the guess this
+            # module refuses; the industry route has the right answer.
+            read_id, read_confidence = understanding.curated_reading(parsed)
+            if read_id and read_confidence >= understanding.MIN_READING_CONFIDENCE:
+                route.role_id = read_id
+                route.reading = role_said
+                route.why = "classified; the model read the job as a curated profile"
+            else:
+                route.unmatched_role = role_said
+        elif not route.role_id and (industry or understanding.curated_industry(parsed)[0]):
+            route.name = INDUSTRY
+            route.why = "classified as a role with no job named; a field was -- industry"
+    if name in (INDUSTRY, COMBINATION, ROLE):
+        # Same arrangement as the role: the model may say which of the six
+        # curated industries the field belongs to, by id, from the closed
+        # list, and `understanding.curated_industry` keeps only an id that
+        # `industries.json` holds. The handler still tries the aliases on
+        # disk first; this is the reading for the words no alias covers.
+        read_id, read_confidence = understanding.curated_industry(parsed)
+        if read_id and read_confidence >= understanding.MIN_READING_CONFIDENCE:
+            route.industry_id = read_id
     return route
 
 
-def classify(llm, question):
-    """The route for this question. Rules first, then one model call."""
+def position_of(parsed):
+    """Where the student said they are, validated -- the situational route's
+    input, read off the same turn reading as everything else.
+
+    Used to be its own skill (`read_position`), a second model call on every
+    situational turn asking for five fields `read_turn` already had room
+    for. One reading, one call; the tracks are checked against the two that
+    exist, the codes against the catalog, and the quarter is left in the
+    student's words for `situation.resolve_position` to check against the
+    track.
+    """
+    if not isinstance(parsed, dict):
+        return {}
+    out = {}
+    for key in ("track", "previous_track"):
+        value = reading.track_of(parsed.get(key))
+        if value:
+            out[key] = value
+    said = parsed.get("current_quarter")
+    if isinstance(said, str) and said.strip():
+        out["said_quarter"] = said.strip()[:60]
+    out["finish_on_time"] = reading.flag_of(parsed.get("finish_on_time"))
+    codes = reading.courses_of(parsed.get("completed_codes"))
+    if codes:
+        out["completed_codes"] = codes
+    return out
+
+
+def read_position(llm, question, context=None):
+    """The position alone, for the turn the situational route asks about.
+
+    The awaiting path -- a bare "winter" answering "which quarter are you
+    in" -- reaches the situational handler without going through
+    `classify`, so it reads the turn here with the same skill and keeps
+    the position fields.
+    """
+    turn = reading.read(READ_TURN, llm, question, context,
+                        roster=understanding.roster(),
+                        industries=understanding.industry_roster())
+    if turn.degraded or not turn.raw:
+        return {}
+    return position_of(turn.raw)
+
+
+def _positions_of(value):
+    """1-based menu positions the model reported, as ints, or []."""
+    if not isinstance(value, (list, tuple)):
+        return []
+    out = []
+    for item in value[:3]:
+        try:
+            position = int(item)
+        except (TypeError, ValueError):
+            continue
+        if 1 <= position <= 10 and position not in out:
+            out.append(position)
+    return out
+
+
+def classify(llm, question, context=None):
+    """The route for this question. Rules first, then one model call.
+
+    `context` is what the planner knows about the conversation -- the
+    question it just asked, what is on file, whether a plan is on screen --
+    rendered into the model's input by `reading.render_context`. The rules do
+    not need it; the reading does, because "heavy" and "17" mean different
+    things depending on what was asked.
+    """
     ruled = rule_route(question)
     if ruled is not None:
         return ruled
-    return _model_route(llm, question)
+    return model_route(llm, question, context)
+
+
+_model_route = model_route

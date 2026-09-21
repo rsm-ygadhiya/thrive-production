@@ -33,7 +33,7 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 django.setup()
 from django.contrib.auth.models import User
 from rsm_thrive.models import Conversation
-from rsm_thrive.services import orchestrator, planner, electives
+from rsm_thrive.services.courses import orchestrator, planner, electives
 from rsm_thrive.services.llm import get_llm
 
 u, _ = User.objects.get_or_create(username="sweep100")

@@ -287,17 +287,7 @@
       {
         "term": "varies",
         "season": "FA",
-        "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."
-      },
-      {
-        "term": "varies",
-        "season": "WI",
-        "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."
-      },
-      {
-        "term": "varies",
-        "season": "SP",
-        "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."
+        "format_notes": "Historically a Fall course; it is not on the Fall 2026 CSE graduate list, so confirm on the CSE tentative offerings page."
       }
     ],
     "description": "Algorithms for supervised and unsupervised learning from data: maximum likelihood, log- linear models including logistic regression, nearest neighbor methods, kernel methods, decision trees, ensemble methods, optimization, topic models, neural networks, and backpropagation.",
@@ -326,7 +316,7 @@
     ],
     "technical_level": 5,
     "grading": "See department syllabus.",
-    "notes": "Pre-approved MSBA elective (listed by Rady as CSE 250B, renumbered to 251A). CSE majors have priority; enroll as space permits.",
+    "notes": "Pre-approved MSBA elective (listed by Rady as CSE 250B, renumbered to 251A). Historically offered in Fall only, and not listed for Fall 2026. Check the CSE department's tentative graduate course offerings page before you plan around it — CSE majors have priority and seats go as space permits.",
     "department": "CSE",
     "also_known_as": [
       "CSE 250B"
@@ -342,18 +332,13 @@
     "offerings": [
       {
         "term": "varies",
-        "season": "FA",
-        "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."
-      },
-      {
-        "term": "varies",
         "season": "WI",
-        "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."
+        "format_notes": "Offered most Winters (and some Springs); confirm on the CSE tentative offerings page."
       },
       {
         "term": "varies",
         "season": "SP",
-        "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."
+        "format_notes": "Offered some Springs; confirm on the CSE tentative offerings page."
       }
     ],
     "description": "Fundamentals of deep neural networks at the graduate level: multi-layer perceptrons, backpropagation, automatic differentiation, convolutional networks, recurrent networks, transformers, and advanced deep learning topics.",
@@ -382,7 +367,7 @@
     ],
     "technical_level": 5,
     "grading": "See department syllabus.",
-    "notes": "Successor to the old 'Neural Networks for Pattern Recognition' (CSE 253) on Rady's pre-approved list. CSE majors have priority; enroll as space permits.",
+    "notes": "Successor to the old 'Neural Networks for Pattern Recognition' (CSE 253) on Rady's pre-approved list. Runs in Winter, sometimes Spring — never Fall in recent years. Check the CSE department's tentative graduate course offerings page before you plan around it — CSE majors have priority and seats go as space permits.",
     "department": "CSE",
     "also_known_as": [
       "CSE 253"
@@ -398,18 +383,8 @@
     "offerings": [
       {
         "term": "varies",
-        "season": "FA",
-        "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."
-      },
-      {
-        "term": "varies",
         "season": "WI",
-        "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."
-      },
-      {
-        "term": "varies",
-        "season": "SP",
-        "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."
+        "format_notes": "Rarely offered — last ran Winter 2023 and Spring 2021. Confirm on the CSE tentative offerings page."
       }
     ],
     "description": "Learning algorithms based on statistics: minimum-variance unbiased estimators, maximum likelihood estimation, likelihood ratio tests, resampling methods, linear logistic regression, feature selection, regularization, dimensionality reduction, manifold detection.",
@@ -436,7 +411,7 @@
     ],
     "technical_level": 5,
     "grading": "See department syllabus.",
-    "notes": "Pre-approved MSBA elective. CSE majors have priority; enroll as space permits.",
+    "notes": "NOT on Rady's pre-approved MSBA elective list (that list carries CSE 250B/251A, CSE 253/251B and CSE 256 only) — taking it would need MSBA advising approval. Rarely offered: last ran Winter 2023. CSE majors have priority; enroll as space permits.",
     "department": "CSE"
   },
   {
@@ -447,19 +422,14 @@
     "is_core": false,
     "offerings": [
       {
-        "term": "varies",
+        "term": "FA26",
         "season": "FA",
-        "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."
+        "instructor": "Nakashole"
       },
       {
         "term": "varies",
         "season": "WI",
-        "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."
-      },
-      {
-        "term": "varies",
-        "season": "SP",
-        "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."
+        "format_notes": "Ran in Winter in 2024 and 2025; confirm on the CSE tentative offerings page."
       }
     ],
     "description": "Modern statistical approaches to natural language processing: part-of-speech tagging, word sense disambiguation, parsing, Markov and hidden Markov models, and probabilistic context-free grammars.",
@@ -486,7 +456,7 @@
     ],
     "technical_level": 5,
     "grading": "See department syllabus.",
-    "notes": "Pre-approved MSBA elective; deeper theoretical complement to MGTA 415. CSE majors have priority; enroll as space permits.",
+    "notes": "Pre-approved MSBA elective; deeper theoretical complement to MGTA 415. Scheduled for Fall 2026 (Nakashole); has also run in Winter. Check the CSE department's tentative graduate course offerings page before you plan around it — CSE majors have priority and seats go as space permits.",
     "department": "CSE"
   },
   {
@@ -1793,24 +1763,19 @@
   {
     "id": "MGT 451",
     "code": "MGT 451",
-    "title": "Technology and Innovation Strategy",
+    "title": "AI and Disruptive Technology Strategy",
     "units": 4,
     "is_core": false,
     "offerings": [
       {
-        "term": "varies",
+        "term": "FA26",
         "season": "FA",
-        "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."
+        "format_notes": "Scheduled as the MGT 451R section (course equivalent — no credit for both). Confirm the section on the UCSD Schedule of Classes."
       },
       {
-        "term": "varies",
+        "term": "WI27",
         "season": "WI",
-        "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."
-      },
-      {
-        "term": "varies",
-        "season": "SP",
-        "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."
+        "format_notes": "Scheduled as the MGT 451R section (course equivalent — no credit for both). Confirm the section on the UCSD Schedule of Classes."
       }
     ],
     "description": "MBA elective on strategy for technology-driven businesses: how firms create and capture value from innovation, platform and ecosystem dynamics, and competitive strategy in technology markets.",
@@ -1835,7 +1800,7 @@
     ],
     "technical_level": 1,
     "grading": "See department syllabus.",
-    "notes": "Pre-approved MSBA elective (MBA course — enrollment by consent). Highly relevant for product management careers.",
+    "notes": "Pre-approved MSBA elective (MBA course — enrollment by consent). Listed on Rady's electives page under its former title, Technology and Innovation Strategy; the UCSD catalog now titles it AI and Disruptive Technology Strategy. The scheduled section is MGT 451R (Fall 2026, Winter 2027), a course equivalent — no credit for both. Highly relevant for product management careers.",
     "department": "MGT",
     "also_known_as": [
       "MGT 271"
@@ -2384,19 +2349,15 @@
     "is_core": false,
     "offerings": [
       {
-        "term": "varies",
-        "season": "FA",
-        "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."
-      },
-      {
-        "term": "varies",
-        "season": "WI",
-        "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."
-      },
-      {
-        "term": "varies",
+        "term": "SP26",
         "season": "SP",
-        "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."
+        "instructor": "Liu",
+        "format_notes": "Scheduled as the MGT 477R section (course equivalent — no credit for both). Confirm the section on the UCSD Schedule of Classes."
+      },
+      {
+        "term": "SP27",
+        "season": "SP",
+        "format_notes": "Scheduled as the MGT 477R section (course equivalent — no credit for both). Confirm the section on the UCSD Schedule of Classes."
       }
     ],
     "description": "MBA elective on how consumers perceive, decide, and buy: psychological foundations of consumer decision-making and their implications for marketing strategy, brand, and product design.",
@@ -2421,7 +2382,7 @@
     ],
     "technical_level": 1,
     "grading": "See department syllabus.",
-    "notes": "Pre-approved MSBA elective (MBA course — enrollment by consent). Pairs well with experiments (MGTA 458) for PM/marketing careers.",
+    "notes": "Pre-approved MSBA elective (MBA course — enrollment by consent). Runs in Spring: the scheduled section is MGT 477R (SP26, SP27), a course equivalent — no credit for both. Pairs well with experiments (MGTA 458) for PM/marketing careers.",
     "department": "MGT",
     "also_known_as": [
       "MGT 203"
@@ -3382,21 +3343,6 @@
         "term": "FA26",
         "season": "FA",
         "instructor": "McAuley, Julian"
-      },
-      {
-        "term": "varies",
-        "season": "FA",
-        "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."
-      },
-      {
-        "term": "varies",
-        "season": "WI",
-        "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."
-      },
-      {
-        "term": "varies",
-        "season": "SP",
-        "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."
       }
     ],
     "description": "Current methods for data mining and predictive analytics with emphasis on real-world datasets and building working systems: recommender systems, web mining, and putting current machine learning research into practice.",
@@ -3425,7 +3371,7 @@
     ],
     "technical_level": 5,
     "grading": "See department syllabus.",
-    "notes": "Cross-listed with CSE 258 — counts as an MGTA elective (not against the 16-unit non-MGTA cap). Taught in the CSE department style: expect substantial coding.",
+    "notes": "Cross-listed with CSE 258 — counts as an MGTA elective (not against the 16-unit non-MGTA cap). CSE 258 has run every Fall since 2017 (Winter sections occasionally); the MSBA section is scheduled for Fall 2026. Taught in the CSE department style: expect substantial coding.",
     "department": "MGTA",
     "also_known_as": [
       "CSE 258"
@@ -4006,21 +3952,6 @@
         "term": "FA26",
         "season": "FA",
         "instructor": "Timmermann, Allan"
-      },
-      {
-        "term": "varies",
-        "season": "FA",
-        "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."
-      },
-      {
-        "term": "varies",
-        "season": "WI",
-        "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."
-      },
-      {
-        "term": "varies",
-        "season": "SP",
-        "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."
       }
     ],
     "description": "Master of Finance course on forecasting for business and financial decisions: time- series methods, forecast evaluation, and applications to financial and economic data.",
@@ -4046,7 +3977,7 @@
     ],
     "technical_level": 4,
     "grading": "See department syllabus.",
-    "notes": "Pre-approved MSBA elective (MFin course — enrollment by consent).",
+    "notes": "Pre-approved MSBA elective (MFin course — enrollment by consent). Scheduled for Fall 2026; no Winter or Spring section is on the schedule.",
     "department": "MGTF"
   },
   {
@@ -4060,21 +3991,6 @@
         "term": "SP26",
         "season": "SP",
         "instructor": "Engelberg"
-      },
-      {
-        "term": "varies",
-        "season": "FA",
-        "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."
-      },
-      {
-        "term": "varies",
-        "season": "WI",
-        "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."
-      },
-      {
-        "term": "varies",
-        "season": "SP",
-        "format_notes": "Offering term varies by year — confirm on the UCSD Schedule of Classes."
       }
     ],
     "description": "Master of Finance course on how psychology shapes financial markets and investor behavior: biases, market anomalies, and behavioral explanations for asset-pricing puzzles.",
@@ -4097,7 +4013,7 @@
     ],
     "technical_level": 2,
     "grading": "See department syllabus.",
-    "notes": "Pre-approved MSBA elective (MFin course — enrollment by consent).",
+    "notes": "Pre-approved MSBA elective (MFin course — enrollment by consent). Runs in Spring; no Fall or Winter section is on the schedule.",
     "department": "MGTF"
   },
   {
